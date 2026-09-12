@@ -2,8 +2,8 @@
 // two texels per file: rect, then (pitch, colw, cap, hue)) and tex_file_u
 // (RGBA8UI, one texel per file: (rung, flags, 0, 0); flags bit 0 hovered,
 // bit 1 has hits, bit 2 current result, bit 3 dimmed). Invisible files
-// become a degenerate quad. Rung 0 is the tile fill in a muted hue; rungs
-// 1..3 draw the dark file background under the lines. The border is in
+// become a degenerate quad. Every rung draws the dark file background
+// under the lines (the hue is only in the directory bands). The border is in
 // device pixels: 1 grey, 2 yellow for hit files, 3 yellow for the current
 // result. Files thinner than a pixel are widened to one so slivers show.
 #version 330 core
@@ -62,9 +62,9 @@ void main() {
     int rung = vRF.x, flags = vRF.y;
     bool hovered = (flags & 1) != 0, hit = (flags & 2) != 0;
     bool current = (flags & 4) != 0, dimmed = (flags & 8) != 0;
-    // rung 0: the tile, darkened to the file background with a trace of the
-    // hue so the sampled one pixel bars drawn over it read
-    vec3 col = rung == 0 ? mix(FILEBG, vTile, 0.15) : FILEBG;
+    // every rung shares the file background: the hue lives in the directory
+    // bands only, so the rung 0/1 cut does not flip a file's colour
+    vec3 col = FILEBG;
     if (dimmed) col *= 0.5;
     float d = min(min(vScreen.x - vSRect.x, vSRect.z - vScreen.x),
                   min(vScreen.y - vSRect.y, vSRect.w - vScreen.y));

@@ -90,14 +90,17 @@ void main() {
     // bars and token blocks leave the bottom of the cell empty so rows read
     // as rows; never thinner than one device pixel
     float barf = max(0.7, min(1.0, 1.0 / vPpl));
+    // bar brightness ramps with pixels per line across the rung 0/1 cut,
+    // so only the sampling changes at one pixel per line, not the look
+    float bara = clamp(0.5 + 0.15 * vPpl, 0.55, 0.8);
     if (rung == 0) {                        // a sampled line: one pixel row
         if (col < indent) discard;
-        frag = vec4(BAR * dim, 0.55);
+        frag = vec4(BAR * dim, bara);
         return;
     }
     if (rung == 1) {
         if (col < indent || vUV.y > barf) discard;
-        frag = vec4(BAR * dim, 0.8);
+        frag = vec4(BAR * dim, bara);
         return;
     }
     uint o = vOff.x + uint(col);            // hi word is zero below 4 GB
