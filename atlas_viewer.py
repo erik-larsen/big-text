@@ -171,14 +171,40 @@ def check_atlas(d):
                          "    ./tests/gen_synthetic_atlas.py         # or a synthetic one")
 
 
-def load_atlas(d):
+LAYOUT_KEYS = ("world", "dir_rect", "dir_pad", "dir_depth", "dir_hue", "file_rect", "file_pitch",
+               "file_cols", "file_rows", "file_cap", "file_colw", "file_hue", "file_row0",
+               "line_row0", "row_line", "row_col0", "row_len", "row_pos", "item_rect",
+               "item_rect_item", "layout")
+METRIC_ORDER = ["tokens", "references", "lines", "chars", "bytes"]
+
+
+def load_layouts(d):
+    """{metric: layout dict} for layout.npz (tokens) and every layout_<metric>.npz."""
+    d = Path(d)
+    out = {}
+    for npz in sorted(d.glob("layout*.npz")):
+        stem = npz.stem
+        js = json.loads((d / (stem + ".json")).read_text())
+        ly = np.load(npz)
+        L = {k: ly[k] for k in ly.files}
+        L["layout"] = js
+        if "row_pos" not in L:
+            raise SystemExit(f"error: {npz} predates wrapped rows; rerun ./atlas_layout.py {d}")
+        out[js.get("metric", "tokens")] = L
+    if not out:
+        raise SystemExit(f"error: no layout.npz in {d}; run ./atlas_layout.py {d}")
+    return out
+
+
+def load_atlas(d, metric=None):
     d = Path(d)
     ix = np.load(d / "index.npz")
-    ly = np.load(d / "layout.npz")
     a = {k: ix[k] for k in ix.files}
-    a.update({k: ly[k] for k in ly.files})
     a["index"] = json.loads((d / "index.json").read_text())
-    a["layout"] = json.loads((d / "layout.json").read_text())
+    a["layouts"] = load_layouts(d)
+    metric = metric if metric in a["layouts"] else ("tokens" if "tokens" in a["layouts"] else next(iter(a["layouts"])))
+    a["metric"] = metric
+    a.update(a["layouts"][metric])
     return a
 
 
@@ -340,11 +366,14 @@ class Viewer:
         self.args = args
         self.scripted = args.frames is not None or args.shots or args.stats
         t0 = time.perf_counter()
-        self.a = load_atlas(args.atlas)
+        self.a = load_atlas(args.atlas, getattr(args, "metric", None))
         a = self.a
         self.res = load_resolve(args.atlas, a)
+        self.metrics = [m for m in METRIC_ORDER if m in a["layouts"]]
+        self.hang = int(a["layout"].get("hang", 2))
         self.n_files = len(a["file_rect"])
-        self.n_lines = len(a["line_pos"])
+        self.n_lines = len(a["line_file"])
+        self.n_rows = len(a["row_pos"])
         self.n_dirs = len(a["dir_rect"])
         self.n_chars = len(a["chars"])
         self.W, self.H = (float(v) for v in a["world"])
@@ -408,6 +437,7 @@ class Viewer:
         self.panel_scroll = 0
         self.panel_rect = None
         self.filter_rect = None
+        self.toolbar = []
         self.search_gen = 0
         self.search_q = queue.Queue()
         self.frame_times = []
@@ -469,44 +499,11 @@ class Viewer:
         self.tex_kinds = texture_2d(GL_R8UI, GL_RED_INTEGER, GL_UNSIGNED_BYTE,
                                     padded_rows(a["kinds"], CHARS_W))
         gpu += 2 * chars.size
-        lf = np.zeros((self.n_lines, 4), np.float32)
-        lf[:, :2] = a["line_pos"]
-        # z: the line's index within its file, for the rung-0 sampling
-        lf[:, 2] = np.arange(self.n_lines) - a["file_line0"][a["line_file"]].astype(np.int64)
-        buf = padded_rows(lf, TEX_W)
-        self.tex_line_f = texture_2d(GL_RGBA32F, GL_RGBA, GL_FLOAT, buf)
-        gpu += buf.nbytes
-        off = a["line_off"][:-1].astype(np.uint64)
-        lu = np.zeros((self.n_lines, 4), np.uint32)
-        lu[:, 0] = (off & np.uint64(0xFFFFFFFF)).astype(np.uint32)
-        lu[:, 1] = a["line_file"]
-        lu[:, 2] = a["line_indent"].astype(np.uint32) | (a["line_len"].astype(np.uint32) << 16)
-        lu[:, 3] = (off >> np.uint64(32)).astype(np.uint32)
-        buf = padded_rows(lu, TEX_W)
-        self.tex_line_u = texture_2d(GL_RGBA32UI, GL_RGBA_INTEGER, GL_UNSIGNED_INT, buf)
-        gpu += buf.nbytes
-        ff = np.zeros((2 * self.n_files, 4), np.float32)
-        ff[0::2] = a["file_rect"]
-        ff[1::2, 0] = a["file_pitch"]
-        ff[1::2, 1] = a["file_colw"]
-        ff[1::2, 2] = a["file_cap"]
-        ff[1::2, 3] = a["file_hue"]
-        buf = padded_rows(ff, TEX_W)
-        self.tex_file_f = texture_2d(GL_RGBA32F, GL_RGBA, GL_FLOAT, buf)
-        gpu += buf.nbytes
+        self.tex_line_f = self.tex_line_u = self.tex_file_f = self.tex_dir_f = None
+        gpu += self.upload_layout()
         self.file_u = padded_rows(np.zeros((self.n_files, 4), np.uint8), TEX_W)
         self.tex_file_u = texture_2d(GL_RGBA8UI, GL_RGBA_INTEGER, GL_UNSIGNED_BYTE, self.file_u)
         gpu += self.file_u.nbytes
-        df = np.zeros((2 * self.n_dirs, 4), np.float32)
-        df[0::2] = a["dir_rect"]
-        df[1::2, 0] = a["dir_pad"]
-        df[1::2, 1] = a["dir_depth"]
-        df[1::2, 2] = a["dir_hue"]
-        buf = padded_rows(df, TEX_W)
-        self.tex_dir_f = texture_2d(GL_RGBA32F, GL_RGBA, GL_FLOAT, buf)
-        gpu += buf.nbytes
-        # directories draw in depth order so parents go under children
-        self.dir_order = np.argsort(a["dir_depth"], kind="stable")
         self.tex_glyphs = texture_2d(GL_R8, GL_RED, GL_UNSIGNED_BYTE,
                                      self.glyphs[:, :, None], GL_LINEAR, mipmap=True)
         gpu += int(self.glyphs.nbytes * 4 / 3)
@@ -547,6 +544,95 @@ class Viewer:
         for i, tex in enumerate(textures):
             glActiveTexture(GL_TEXTURE0 + i)
             glBindTexture(GL_TEXTURE_2D, tex)
+
+    def upload_layout(self):
+        """(Re)upload the layout textures: one texel per visual row (position,
+        row index in file; byte offset, file, indent | len), two per file and
+        two per directory. Returns the bytes uploaded."""
+        a = self.a
+        for t in (self.tex_line_f, self.tex_line_u, self.tex_file_f, self.tex_dir_f):
+            if t is not None:
+                glDeleteTextures(1, [t])
+        gpu = 0
+        n_rows = self.n_rows
+        rl = a["row_line"].astype(np.int64)
+        lf = np.zeros((n_rows, 4), np.float32)
+        lf[:, :2] = a["row_pos"]
+        # z: the row's index within its file, for the rung-0 sampling
+        lf[:, 2] = np.arange(n_rows) - a["file_row0"][a["line_file"][rl]].astype(np.int64)
+        buf = padded_rows(lf, TEX_W)
+        self.tex_line_f = texture_2d(GL_RGBA32F, GL_RGBA, GL_FLOAT, buf)
+        gpu += buf.nbytes
+        off = a["line_off"][:-1].astype(np.uint64)[rl] + a["row_col0"].astype(np.uint64)
+        first = a["row_col0"] == 0
+        indent = np.where(first, a["line_indent"][rl], 0).astype(np.uint32)
+        lu = np.zeros((n_rows, 4), np.uint32)
+        lu[:, 0] = (off & np.uint64(0xFFFFFFFF)).astype(np.uint32)
+        lu[:, 1] = a["line_file"][rl]
+        lu[:, 2] = indent | (a["row_len"].astype(np.uint32) << 16)
+        lu[:, 3] = (off >> np.uint64(32)).astype(np.uint32)
+        buf = padded_rows(lu, TEX_W)
+        self.tex_line_u = texture_2d(GL_RGBA32UI, GL_RGBA_INTEGER, GL_UNSIGNED_INT, buf)
+        gpu += buf.nbytes
+        ff = np.zeros((2 * self.n_files, 4), np.float32)
+        ff[0::2] = a["file_rect"]
+        ff[1::2, 0] = a["file_pitch"]
+        ff[1::2, 1] = a["file_colw"]
+        ff[1::2, 2] = a["file_cap"]
+        ff[1::2, 3] = a["file_hue"]
+        buf = padded_rows(ff, TEX_W)
+        self.tex_file_f = texture_2d(GL_RGBA32F, GL_RGBA, GL_FLOAT, buf)
+        gpu += buf.nbytes
+        df = np.zeros((2 * self.n_dirs, 4), np.float32)
+        df[0::2] = a["dir_rect"]
+        df[1::2, 0] = a["dir_pad"]
+        df[1::2, 1] = a["dir_depth"]
+        df[1::2, 2] = a["dir_hue"]
+        buf = padded_rows(df, TEX_W)
+        self.tex_dir_f = texture_2d(GL_RGBA32F, GL_RGBA, GL_FLOAT, buf)
+        gpu += buf.nbytes
+        # directories draw in depth order so parents go under children
+        self.dir_order = np.argsort(a["dir_depth"], kind="stable")
+        return gpu
+
+    def bind_textures(self):
+        for i, tex in enumerate([self.tex_chars, self.tex_kinds, self.tex_glyphs, self.tex_line_f,
+                                 self.tex_line_u, self.tex_file_f, self.tex_file_u, self.tex_dir_f]):
+            glActiveTexture(GL_TEXTURE0 + i)
+            glBindTexture(GL_TEXTURE_2D, tex)
+
+    def set_metric(self, metric):
+        """Switch to another metric's layout: a hard cut, as in the video.
+        The world is the same size, so the camera stays where it is."""
+        if metric == self.a["metric"] or metric not in self.a["layouts"]:
+            return
+        a = self.a
+        a.update(a["layouts"][metric])
+        a["metric"] = metric
+        self.n_rows = len(a["row_pos"])
+        self.item_rect_file = a["item_file"][a["item_rect_item"]]
+        self.build_hover_grid()
+        self.build_dir_tags()
+        order = np.argsort(a["file_pitch"], kind="stable")
+        per_file = np.diff(a["file_line0"])[order]
+        mid = min(int(np.searchsorted(np.cumsum(per_file), per_file.sum() / 2)), len(order) - 1)
+        self.median_pitch = float(a["file_pitch"][order[mid]])
+        self.upload_layout()
+        self.bind_textures()
+        self.hover = None
+
+    def row_of(self, line, col):
+        """(visual row, column within the row) of a character of a global
+        line, following the wrap: the first row holds cap columns and each
+        continuation row cap - hang, drawn hang columns in."""
+        a = self.a
+        line = np.asarray(line, np.int64)
+        col = np.asarray(col, np.int64)
+        cap = a["file_cap"][a["line_file"][line]].astype(np.int64)
+        capw = np.where(cap >= 16, cap, 4096)
+        r = np.where(col < capw, 0, 1 + np.maximum(col - capw, 0) // np.maximum(capw - self.hang, 1))
+        row = np.minimum(a["line_row0"][line].astype(np.int64) + r, a["line_row0"][line + 1].astype(np.int64) - 1)
+        return row, col - a["row_col0"][row].astype(np.int64)
 
     def uniform(self, prog, name):
         d = self.loc[prog]
@@ -729,6 +815,11 @@ class Viewer:
             self.press = None
 
     def click(self, sx, sy):
+        for rect, act in self.toolbar:
+            if in_rect(sx, sy, rect):
+                if act[0] == "metric":
+                    self.set_metric(act[1])
+                return
         if self.filter_rect and in_rect(sx, sy, self.filter_rect):
             self.filter_focus = True
             return
@@ -806,6 +897,9 @@ class Viewer:
             self.step(-1)
         elif key == glfw.KEY_R:
             self.fit()
+        elif key == glfw.KEY_M and len(self.metrics) > 1:
+            i = self.metrics.index(self.a["metric"])
+            self.set_metric(self.metrics[(i + 1) % len(self.metrics)])
         elif key == glfw.KEY_I and self.res is not None:
             self.toggle_inspector()
         elif key == glfw.KEY_TAB and self.res is not None:
@@ -1048,8 +1142,9 @@ class Viewer:
         """World rect around a line (about `lines` by `cols` cells), so the
         destination of a fly-to is at the text rung."""
         p = float(self.a["file_pitch"][f])
-        x, y = (float(v) for v in self.a["line_pos"][line])
-        xc, yc = x + col * p * self.A, y + p / 2
+        row, rc = self.row_of(line, col)
+        x, y = (float(v) for v in self.a["row_pos"][int(row)])
+        xc, yc = x + int(rc) * p * self.A, y + p / 2
         hw, hh = cols / 2 * p * self.A, lines / 2 * p
         return (xc - hw, yc - hh, xc + hw, yc + hh)
 
@@ -1107,13 +1202,19 @@ class Viewer:
         x0, y0 = a["file_rect"][f, :2]
         p, k, rows, colw = (float(a["file_pitch"][f]), int(a["file_cols"][f]),
                             int(a["file_rows"][f]), float(a["file_colw"][f]))
-        n = int(a["file_line0"][f + 1] - a["file_line0"][f])
+        n = int(a["file_row0"][f + 1] - a["file_row0"][f])
         c = min(max(int((wx - x0) // colw), 0), max(k - 1, 0))
         r = int(math.floor((wy - y0 - p) / p))
         j = c * rows + r if 0 <= r < rows else -1
         if j >= n:
             j = -1
         col = int((wx - x0 - c * colw) // (p * self.A))
+        if j >= 0:                      # visual row -> logical line and column
+            row = int(a["file_row0"][f]) + j
+            line = int(a["row_line"][row])
+            col0 = int(a["row_col0"][row])
+            col = col0 + col - (0 if col0 == 0 else self.hang)
+            j = line - int(a["file_line0"][f])
         return f, j, col
 
     def enclosing_item(self, f, j):
@@ -1224,7 +1325,8 @@ class Viewer:
         flags = np.zeros(self.n_files, np.uint8)
         cur = self.cursor_override if self.scripted else self.cursor
         over_ui = cur is not None and any(rc and in_rect(cur[0], cur[1], rc)
-                                          for rc in (self.panel_rect, self.filter_rect))
+                                          for rc in [self.panel_rect, self.filter_rect]
+                                          + [r for r, _ in self.toolbar])
         self.hover = (self.hover_at(*cur) if cur is not None and self.drag is None
                       and not over_ui else None)
         if self.hover is not None:
@@ -1259,7 +1361,7 @@ class Viewer:
         if not vis.any():
             return
         edges = np.flatnonzero(np.diff(np.concatenate(([False], vis, [False]))))
-        l0 = self.a["file_line0"]
+        l0 = self.a["file_row0"]
         glUseProgram(self.prog["line"])
         loc = self.uniform("line", "uBase")
         glBindVertexArray(self.quad_vao)
@@ -1362,10 +1464,11 @@ class Viewer:
         idx = np.flatnonzero(m)
         ff = f[idx]
         p = a["file_pitch"][ff]
-        cap = a["file_cap"][ff].astype(np.float64)
-        pos = a["line_pos"][r["line"][idx]].astype(np.float64)
-        c0 = np.minimum(r["col"][idx], cap) * p * self.A
-        c1 = np.minimum(r["col"][idx] + r["len"], cap) * p * self.A
+        row, rc = self.row_of(r["line"][idx], r["col"][idx])
+        pos = a["row_pos"][row].astype(np.float64)
+        rlen = a["row_len"][row].astype(np.float64)
+        c0 = np.minimum(rc, rlen) * p * self.A
+        c1 = np.minimum(rc + r["len"], rlen) * p * self.A
         inst = np.zeros((len(idx), 10), np.float32)
         inst[:, 0] = pos[:, 0] + c0
         inst[:, 1] = pos[:, 1]
@@ -1452,6 +1555,27 @@ class Viewer:
         glScissor(0, 0, int(self.map_w), self.fb_h)
         flush()                            # and go under the panels
         glDisable(GL_SCISSOR_TEST)
+
+        # toolbar, top left: lens, projection, metric (text buttons; the
+        # active one in yellow; 3D arrives with phase 3)
+        self.toolbar = []
+        tx, ty = m, m
+        th = size + 2 * pad * 0.6
+        groups = [[("Folders", ("lens", "folders"), True)],
+                  [("2D", ("proj", "2d"), True), ("3D", ("proj", "3d"), False)],
+                  [(mt.capitalize(), ("metric", mt), mt == self.a["metric"]) for mt in self.metrics]]
+        for gi, group in enumerate(groups):
+            if gi:
+                tx += m
+            for text, act, active in group:
+                bw = len(text) * cw + 2 * pad
+                box(tx, ty, tx + bw, ty + th, UI_BOX, 0.85)
+                enabled = act != ("proj", "3d")
+                label(tx + pad, ty + pad * 0.6, text,
+                      color=YELLOW if active else (UI_TEXT if enabled else UI_DIM))
+                if enabled:
+                    self.toolbar.append(((tx, ty, tx + bw, ty + th), act))
+                tx += bw + 2 * s
 
         # crumb trail, bottom left
         bw = len(self.crumb) * cw + 2 * pad
@@ -1622,9 +1746,10 @@ class Viewer:
             f = next(i for i, pth in enumerate(self.paths) if pth == path or pth.endswith("/" + path))
             gl = int(self.a["file_line0"][f]) + int(line) - 1
             self.fly_to(self.line_rect(f, gl, int(col) - 1, lines=30, cols=90), complete=True)
-            x, y = (float(v) for v in self.a["line_pos"][gl])
+            row, rc = self.row_of(gl, int(col) - 1)
+            x, y = (float(v) for v in self.a["row_pos"][int(row)])
             p = float(self.a["file_pitch"][f])
-            self.cursor_override = self.world_to_screen(x + (int(col) - 0.5) * p * self.A, y + p / 2)
+            self.cursor_override = self.world_to_screen(x + (int(rc) + 0.5) * p * self.A, y + p / 2)
             held = True
         return held
 
@@ -1686,6 +1811,12 @@ class Viewer:
         if self.results is not None and len(self.results["order"]):
             self.goto_result((self.args.step or 1) - 1, complete=True)
         snap("result.png")
+        if "references" in self.metrics:
+            self.set_filter("")
+            self.set_metric("references")
+            self.fit()
+            snap("references.png")
+            self.set_metric("tokens")
         if self.args.stats:
             self.print_stats()
 
@@ -1761,6 +1892,8 @@ def main():
                     help="zoom so the file under the view centre has this many device px per line")
     ap.add_argument("--filter", default=None, metavar="WORD", help="apply a filter")
     ap.add_argument("--step", type=int, default=None, metavar="K", help="step to result K (1-based)")
+    ap.add_argument("--metric", default=None, choices=METRIC_ORDER,
+                    help="start with this metric's layout (default tokens); M cycles them")
     ap.add_argument("--inspector", action="store_true",
                     help="open the Inspector with nothing selected (the coverage block)")
     ap.add_argument("--inspect", default=None, metavar="NAME",

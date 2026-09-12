@@ -298,3 +298,9 @@ Viewer with a resolve file present:
 - `atlas_layout.py --metric references` uses `file_refs_in`.
 
 Acceptance: on makepad-draw, `Window` lists the `pub type Window = XID` definition with kind type and only code references; hovering `Window` in x11_sys.rs at text zoom shows its counts; the Inspector coverage block has every status with a non-zero total; `./atlas_resolve.py` on all of makepad finishes in a few minutes with `--workers 10`.
+
+## Stage 2 as built in phase 2: rows and metric layouts
+
+Long lines wrap: the layout emits visual rows, not lines. A line of L characters in a column of cap characters takes 1 row if L is at most cap, else 1 plus ceil((L - cap) / (cap - 2)) continuation rows, each drawn 2 characters in (the hang); columns under 16 characters clip instead. The pitch and the capacity are iterated to a fixed point because wrapping adds rows. `layout.npz` therefore carries `row_pos` (x, y per row), `row_line` (the row's line), `row_col0` (its first column), `row_len`, `line_row0` (first row of each line, n_lines + 1) and `file_row0` (first row of each file, n_files + 1) instead of `line_pos`; item rectangles span rows. The viewer's line textures hold one texel per row (byte offset = the line's offset plus row_col0; indent only on a line's first row), hover maps a row back to its line and column, and `row_of(line, col)` maps the other way for hits and fly-to.
+
+One layout per metric: `atlas_layout.py` writes `layout.npz` for tokens and `layout_<metric>.npz` plus its JSON for references (when `resolve.npz` exists) and lines; `--metric X` writes just one. The viewer loads every layout present, the toolbar's metric buttons and `M` switch between them by re-uploading the layout textures (a hard cut, as Rik settled on), and the camera stays put because the world size is the same. The toolbar is text buttons drawn over the map's top left: lens (Folders), projection (2D; 3D greyed until phase 3), metric.

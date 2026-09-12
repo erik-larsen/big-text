@@ -438,5 +438,15 @@ def main():
           f"char_aspect {A:.3f}, pitch {file_pitch.min():.3f}..{file_pitch.max():.3f}")
 
 
+
 if __name__ == "__main__":
     main()
+    # the real layout stage on the synthetic index, so the viewer's row
+    # format (wrapped rows, one layout per metric) is what the tests see
+    import subprocess
+    out = "data/synthetic_atlas"
+    for i, a in enumerate(sys.argv[1:]):
+        if a == "--out":
+            out = sys.argv[i + 2]
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    subprocess.run([sys.executable, os.path.join(root, "atlas_layout.py"), out], check=True)

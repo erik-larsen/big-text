@@ -57,6 +57,7 @@ That is 19 files and 15,216 lines, indexed and laid out in well under a second. 
 | Click a result | Fly to it |
 | Click a symbol at text zoom | Select it in the Inspector: kind, definition, scope, every reference |
 | `I` / `Tab` | Open or close the Inspector / switch between Inspector and Results |
+| Toolbar or `M` | Switch the area metric: Tokens, References, Lines (a hard cut to another layout) |
 | `R` | Refit the map |
 | `Escape` | Clear the filter, then the selection |
 
@@ -76,6 +77,14 @@ big-picture's own source at the four rungs, from the fitted map through 2, 4.5 a
 ![big-picture bars](docs/shots/big-picture/bars.png)
 ![big-picture tokens](docs/shots/big-picture/tokens.png)
 ![big-picture text](docs/shots/big-picture/text.png)
+
+The same corpus laid out by references instead of tokens (the toolbar's second metric): the files everything depends on grow, the generated bindings shrink.
+
+![references layout](docs/shots/makepad-draw/references.png)
+
+A long line wrapped inside its column at text zoom, the continuation rows hanging in by two characters (the credits block of stb_image.h).
+
+![wrapped lines](docs/shots/big-picture/wrapped.png)
 
 The resolver's view of makepad-draw: hovering `Window` in the x11 bindings, and the Inspector on the enum variant of the same name with its references grouped by file.
 
@@ -97,7 +106,7 @@ The two glyph tiers at 120 pixels per line: the 64 pixel raster atlas magnified 
 The contract that the code was built against is [docs/DESIGN.md](docs/DESIGN.md), including the deviations found while building. The short version:
 
 - **Index.** `atlas_index.py` walks the tree (honouring `.gitignore`, skipping binaries), expands tabs, maps every character to one column, and runs a small regex tokenizer per language family (Rust, C-like, Python, shell, plain) that assigns one of ten kinds to every character. Items (functions, structs, enums, impls, modules) come from regexes with brace or indentation matching. Output is a handful of numpy arrays: the characters, their kinds, line offsets, file ranges, item ranges.
-- **Layout.** `atlas_layout.py` is a squarified treemap over the directory tree with padding per level that the viewer draws as the directory band, so the bands widen as you zoom. Area is by tokens, as in the video's toolbar (characters, lines or bytes on request). Each file is wrapped into as many equal columns as keep about a 90th-percentile line width readable, at a pitch that fits its lines; lines longer than a column are clipped, not wrapped. A preview PNG and `tests/check_layout.py` check the invariants.
+- **Layout.** `atlas_layout.py` is a squarified treemap over the directory tree with padding per level that the viewer draws as the directory band, so the bands widen as you zoom. It writes one layout per metric: tokens (the default, as in the video's toolbar), references from the resolver's fan-in, and lines; the viewer loads them all and the toolbar or `M` switches with a hard cut, the world staying the same size so the camera does not move. Each file is wrapped into as many equal columns as keep about a 90th-percentile line width readable, at a pitch that fits its rows; lines longer than a column wrap inside it, continuation rows hanging in by two characters, with the pitch and capacity iterated to a fixed point (columns under 16 characters clip instead). A preview PNG and `tests/check_layout.py` check the invariants.
 - **The ladder.** Per frame the viewer computes device pixels per line for every file and picks a rung: under 1, sampled one-pixel bars; 1 to 3, one grey bar per line from indent to length; 3 to 6, one block per character in its kind colour, plus item outlines; 6 and up, glyphs. Below 3 px the items are also drawn as filled bands in their kind colour under the bars, Rik's kind-bands representation, and from 3 px the outlines take over. The switches are hard cuts, as in the video. Everything is resident: characters and kinds as 8-bit textures, lines and files as float and integer textures, one instanced quad per line drawn per run of visible files, the border ring drawn again after the text.
 - **Glyphs.** `atlas_font.py` rasterises the 95 printable ASCII glyphs of one monospace face into a mipmapped atlas that also draws the UI. `vt_glyphs.py` is the port of Dobbie's vector textures: quadratic outlines from fontTools, diced into a grid of curve lists, ray-cast per pixel in `shaders/vt_glyph.glsl`; its test measures a mean coverage error of 0.010 against Pillow at 96 pixels.
 - **Resolver.** `atlas_resolve.py` parses every file with tree-sitter and collects entities (functions, methods, structs, fields, enums, variants, traits, type aliases, consts, statics, modules, macros, type parameters, parameters, locals) and every identifier use. Each use is resolved lexically, in order: the enclosing function's locals, the file, the file's `use` imports through the crate found by its Cargo.toml, a unique name in the crate, a unique name in the corpus, with type parameters, `Self`, enum paths and `Type::method` handled along the way; what is left is ambiguous, external (a crate not in the corpus), missing import, missing macro or not found, and the counts of each are the Inspector's coverage block. No type inference, so a method after a dot with several candidates is "method dispatch", the same category Rik's analyser reports. Rust is covered fully; Python and C get functions, types, parameters and locals. All of makepad resolves in 25 seconds on ten cores: 864k entities and 4.7 million references, 64 percent of them resolved, across 317 crates; Rik's Inspector reports 722k entities and 1.3 million edges for the same tree, so the scale matches even though the rules do not.
@@ -106,7 +115,7 @@ The contract that the code was built against is [docs/DESIGN.md](docs/DESIGN.md)
 
 Measured on an M4 MacBook at a 2940 by 1658 framebuffer, `--frames 300 --stats` over the scripted zoom from fit to text: big-picture 1.2 ms mean and 3.4 ms 99th percentile; makepad-draw 1.6 and 4.4 ms; the full makepad tree 4.5 and 23.7 ms, the tail being the fitted view where all 3.67 million lines are visible, and 1.3 ms once zoomed to text.
 
-Not built: the 3D projection and tilt, lenses other than Folders, history, and a streaming working set (the whole corpus is resident, which is fine to a few million lines).
+Not built: the 3D projection and tilt, lenses other than Folders and Size, history, and a streaming working set (the whole corpus is resident, which is fine to a few million lines).
 
 ## Decisions so far
 
@@ -137,7 +146,7 @@ big-text/
   notes/makepad-code-atlas.md  what the public makepad history and the video say about the code atlas
   atlas_index.py               source tree -> data/<name>_atlas/index.npz + index.json
   atlas_resolve.py             tree-sitter entities and lexically resolved references -> resolve.npz + resolve.json
-  atlas_layout.py              index -> layout.npz + layout.json (+ --preview PNG)
+  atlas_layout.py              index -> layout.npz (tokens), layout_references.npz, layout_lines.npz (+ --preview PNG)
   atlas_font.py                monospace font -> raster glyph atlas
   atlas_viewer.py              the viewer
   vt_glyphs.py                 the Dobbie vector-texture glyph tier

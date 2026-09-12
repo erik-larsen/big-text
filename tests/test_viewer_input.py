@@ -125,7 +125,8 @@ def main():
         frames(v, 1)
     f, line, col, ln, is_def, kind = v.result(0)
     x0, y0, x1, y1 = v.view()
-    lx, ly = v.a["line_pos"][line]
+    row, _ = v.row_of(line, col)
+    lx, ly = v.a["row_pos"][int(row)]
     check(x0 <= lx <= x1 and y0 <= ly <= y1, "fly-to ended with the hit line in view")
     check(v.rung[f] == 3, f"hit file at the text rung after the fly (rung {v.rung[f]})")
     check(v.current_file == f, "current result file flagged")

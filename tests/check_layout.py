@@ -6,7 +6,7 @@ of index.npz and layout.npz; every file rectangle inside its directory's inner
 rectangle and every directory inside its parent's; siblings (files and child
 directories of one directory) do not overlap; every line cell inside its
 file's rectangle; item rectangles inside their file's rectangle; and
-file_cols * file_rows >= n_lines for every file.
+file_cols * file_rows >= rows for every file, and the rows of a line cover its characters.
 
   tests/check_layout.py data/big-picture_atlas
 """
@@ -27,7 +27,9 @@ LAYOUT_ARRAYS = {"world": "float64", "dir_rect": "float64", "dir_pad": "float64"
                  "dir_depth": "uint16", "dir_hue": "uint8", "file_rect": "float64",
                  "file_pitch": "float64", "file_cols": "uint16", "file_rows": "uint32",
                  "file_cap": "uint16", "file_colw": "float64", "file_hue": "uint8",
-                 "line_pos": "float32", "item_rect": "float32", "item_rect_item": "uint32"}
+                 "row_pos": "float32", "row_line": "uint32", "row_col0": "uint16", "row_len": "uint16",
+                 "line_row0": "uint32", "file_row0": "uint32",
+                 "item_rect": "float32", "item_rect_item": "uint32"}
 
 
 def inside(inner, outer, eps=EPS):
@@ -99,7 +101,8 @@ def main():
     file_rect, pitch = L["file_rect"], L["file_pitch"]
     cols, rows, colw = L["file_cols"].astype(np.int64), L["file_rows"].astype(np.int64), L["file_colw"]
     check(dir_rect.shape == (n_dirs, 4) and file_rect.shape == (n_files, 4)
-          and L["line_pos"].shape == (n_lines, 2) and len(L["dir_pad"]) == n_dirs
+          and L["row_pos"].shape == (len(L["row_line"]), 2) and len(L["dir_pad"]) == n_dirs
+          and len(L["line_row0"]) == n_lines + 1 and len(L["file_row0"]) == n_files + 1
           and len(pitch) == n_files and L["item_rect"].shape[1] == 4
           and len(L["item_rect_item"]) == len(L["item_rect"]) and len(lay["dirs"]) == n_dirs,
           "layout: array shapes match the index")
@@ -133,19 +136,34 @@ def main():
     check(overlaps == 0, f"layout: sibling rectangles do not overlap ({overlaps} overlapping pairs "
                          f"among {siblings} siblings)")
 
-    check((cols * rows >= np.diff(file_line0.astype(np.int64))).all() and (cols >= 1).all()
-          and (rows >= 1).all(), "layout: file_cols * file_rows >= n_lines for every file")
+    file_row0, line_row0 = L["file_row0"].astype(np.int64), L["line_row0"].astype(np.int64)
+    row_line, row_col0, row_len = L["row_line"].astype(np.int64), L["row_col0"].astype(np.int64), L["row_len"].astype(np.int64)
+    n_rows = len(row_line)
+    check((cols * rows >= np.diff(file_row0)).all() and (cols >= 1).all()
+          and (rows >= 1).all(), "layout: file_cols * file_rows >= rows for every file")
     check((pitch > 0).all() and (colw > 0).all(), "layout: positive pitches and column widths")
-    lf = z["line_file"]
-    lp = L["line_pos"].astype(np.float64)
-    cell = np.stack([lp[:, 0], lp[:, 1], lp[:, 0], lp[:, 1] + pitch[lf]], axis=1)
-    bad = ~inside(cell, file_rect[lf], eps=1e-3)      # line_pos is float32
-    check(not bad.any(), f"layout: every line cell inside its file's rectangle ({int(bad.sum())} outside)")
-    # the column a line sits in is the one the viewer will compute from x
-    c = ((lp[:, 0] - file_rect[lf, 0]) / colw[lf] + 0.5).astype(np.int64)
-    j = np.arange(n_lines) - file_line0[:-1].astype(np.int64)[lf]
-    check((c == j // rows[lf]).all() and (c < cols[lf]).all(),
-          "layout: line x positions land on their column")
+    check((np.diff(line_row0) >= 1).all() and line_row0[-1] == n_rows
+          and (file_row0 == line_row0[file_line0]).all(),
+          "layout: every line has at least one row and file_row0 follows line_row0")
+    line_len = z["line_len"].astype(np.int64)
+    covered = np.zeros(n_lines, np.int64)
+    np.add.at(covered, row_line, row_len)
+    cap = L["file_cap"].astype(np.int64)[z["line_file"]]
+    wrapped = cap >= 16
+    check((covered[wrapped] == line_len[wrapped]).all()
+          and (covered[~wrapped] == np.minimum(line_len[~wrapped], 4096)).all()
+          and (row_col0[np.diff(line_row0)[row_line] == 1] == 0).all(),
+          "layout: the rows of a line cover exactly its characters")
+    rf = z["line_file"][row_line]
+    lp = L["row_pos"].astype(np.float64)
+    cell = np.stack([lp[:, 0], lp[:, 1], lp[:, 0], lp[:, 1] + pitch[rf]], axis=1)
+    bad = ~inside(cell, file_rect[rf], eps=1e-3)      # row_pos is float32
+    check(not bad.any(), f"layout: every row cell inside its file's rectangle ({int(bad.sum())} outside)")
+    # the column a row sits in is the one the viewer will compute from x
+    c = ((lp[:, 0] - file_rect[rf, 0]) / colw[rf] + 0.5).astype(np.int64)   # rows hang in a little
+    j = np.arange(n_rows) - file_row0[:-1][rf]
+    check((c == j // rows[rf]).all() and (c < cols[rf]).all(),
+          "layout: row x positions land on their column")
 
     ir, ii = L["item_rect"].astype(np.float64), L["item_rect_item"]
     check(len(ii) == 0 or int(ii.max()) < n_items, "layout: item_rect_item indexes items")

@@ -159,7 +159,23 @@ def file_tokens(kinds, line_off, file_line0):
     return np.diff(cum[fo]).astype(np.float64)
 
 
+HANG = 2                   # columns a wrapped continuation row hangs in by
+WRAP_MIN = 16              # narrower columns clip instead of wrapping
+
+
+def rows_per_line(line_len, capw):
+    """Visual rows a line takes in a column of capw characters: 1, or 1 plus
+    the continuation rows of capw - HANG characters each."""
+    L = line_len.astype(np.int64)
+    extra = np.maximum(L - capw, 0)
+    return 1 + (extra + (capw - HANG) - 1) // (capw - HANG)
+
+
 def layout_files(file_rect, file_line0, line_len, char_aspect):
+    """Per file: pitch, columns, rows per column, characters per column,
+    column width (with its gap). Long lines wrap inside their column, so the
+    row count is found by iterating the pitch and the capacity to a fixed
+    point; columns narrower than WRAP_MIN characters clip instead."""
     n_files = len(file_rect)
     pitch = np.zeros(n_files)
     cols = np.zeros(n_files, np.int64)
@@ -170,29 +186,67 @@ def layout_files(file_rect, file_line0, line_len, char_aspect):
         x0, y0, x1, y1 = file_rect[f]
         a, b = int(file_line0[f]), int(file_line0[f + 1])
         n = b - a
-        target = int(np.percentile(line_len[a:b], 90)) if n else TARGET_MIN
+        lens = line_len[a:b]
+        target = int(np.percentile(lens, 90)) if n else TARGET_MIN
         target = min(max(target, TARGET_MIN), TARGET_MAX)
         k, r, p, cw, c = file_columns(x1 - x0, y1 - y0, n, target, char_aspect)
-        pitch[f], cols[f], rows[f], cap[f], colw[f] = p, k, r, min(c, CAP_MAX), cw * (1 + GAP)
+        c = min(c, CAP_MAX)
+        if n and c >= WRAP_MIN and (lens > c).any():
+            h = y1 - y0
+            for _ in range(4):                # pitch and capacity to a fixed point
+                capw = c if c >= WRAP_MIN else CAP_MAX
+                total = int(rows_per_line(lens, capw).sum())
+                r = -(-total // k)
+                p = h / (r + 2)
+                c2 = min(int(cw / (p * char_aspect)) if p > 0 else 0, CAP_MAX)
+                if c2 == c:
+                    break
+                c = c2
+            capw = c if c >= WRAP_MIN else CAP_MAX
+            r = -(-int(rows_per_line(lens, capw).sum()) // k)
+            p = h / (r + 2)
+        pitch[f], cols[f], rows[f], cap[f], colw[f] = p, k, r, c, cw * (1 + GAP)
     return pitch, cols, rows, cap, colw
 
 
-def line_positions(file_rect, file_line0, pitch, rows, colw, n_lines):
-    n_files = len(file_rect)
+def wrap_rows(file_line0, line_len, cap):
+    """The visual rows of every line: line_row0 (n_lines + 1), and per row
+    its line, first column, length and whether it is the line's first row."""
+    n_lines = len(line_len)
     per_file = np.diff(file_line0).astype(np.int64)
-    lf = np.repeat(np.arange(n_files), per_file)
-    j = np.arange(n_lines) - file_line0[:-1][lf].astype(np.int64)
-    c, r = j // rows[lf], j % rows[lf]
-    x = file_rect[lf, 0] + c * colw[lf]
-    y = file_rect[lf, 1] + pitch[lf] * (1 + r)
+    lf = np.repeat(np.arange(len(per_file)), per_file)
+    capw = np.where(cap[lf] >= WRAP_MIN, cap[lf], CAP_MAX)
+    nrows = rows_per_line(line_len, capw)
+    line_row0 = np.concatenate(([0], np.cumsum(nrows)))
+    n_rows = int(line_row0[-1])
+    row_line = np.repeat(np.arange(n_lines), nrows)
+    ri = np.arange(n_rows) - np.repeat(line_row0[:-1], nrows)
+    cw = capw[row_line]
+    first = ri == 0
+    col0 = np.where(first, 0, cw + (ri - 1) * (cw - HANG))
+    L = line_len.astype(np.int64)[row_line]
+    row_len = np.where(first, np.minimum(L, cw), np.minimum(L - col0, cw - HANG))
+    return line_row0, row_line, col0, np.maximum(row_len, 0), first
+
+
+def row_positions(file_rect, file_row0, pitch, rows, colw, row_first, char_aspect):
+    n_rows = len(row_first)
+    per_file = np.diff(file_row0).astype(np.int64)
+    rf = np.repeat(np.arange(len(per_file)), per_file)
+    j = np.arange(n_rows) - file_row0[:-1][rf].astype(np.int64)
+    c, r = j // rows[rf], j % rows[rf]
+    x = file_rect[rf, 0] + c * colw[rf] + np.where(row_first, 0.0, HANG * pitch[rf] * char_aspect)
+    y = file_rect[rf, 1] + pitch[rf] * (1 + r)
     return np.stack([x, y], axis=1)
 
 
-def item_rects(item_file, item_start, item_end, file_rect, file_line0, pitch, rows, colw):
+def item_rects(item_file, s_row, e_row, file_rect, file_row0, pitch, rows, colw):
+    """One rectangle per column an item spans; s_row and e_row are the
+    item's first and one-past-last visual rows, file-relative."""
     f = item_file.astype(np.int64)
-    n_lines_f = np.diff(file_line0).astype(np.int64)[f]
-    s = item_start.astype(np.int64)
-    e = np.minimum(item_end.astype(np.int64), n_lines_f)
+    n_rows_f = np.diff(file_row0).astype(np.int64)[f]
+    s = s_row.astype(np.int64)
+    e = np.minimum(e_row.astype(np.int64), n_rows_f)
     ok = e > s
     f, s, e = f[ok], s[ok], e[ok]
     ids = np.nonzero(ok)[0]
@@ -222,11 +276,11 @@ def hue_rgb(i):
 
 
 def mix(a, b, t):
-    return tuple(int(round(a[i] * (1 - t) + b[i] * t)) for i in range(3))
+    return tuple(int(round(a[i] + (b[i] - a[i]) * t)) for i in range(3))
 
 
 def render_preview(path, world, dirs, dir_rect, dir_pad, dir_hue, file_rect, file_hue,
-                   pitch, cols, rows, cap, colw, file_line0, line_pos, line_len, line_indent,
+                   pitch, cols, rows, cap, colw, file_row0, row_pos, row_len, row_indent,
                    char_aspect, width=2400):
     from PIL import Image, ImageDraw, ImageFont
     s = width / world[0]
@@ -251,19 +305,19 @@ def render_preview(path, world, dirs, dir_rect, dir_pad, dir_hue, file_rect, fil
     for f in range(len(file_rect)):
         x0, y0, x1, y1 = px(file_rect[f])
         p = pitch[f] * s
-        a, b = int(file_line0[f]), int(file_line0[f + 1])
+        a, b = int(file_row0[f]), int(file_row0[f + 1])
         dr.rectangle([x0, y0, max(x1 - 1, x0), max(y1 - 1, y0)], outline=outline, width=1)
         if b == a or y1 - y0 < 3:
             continue
-        step = max(1, int(math.ceil(1 / p)))  # sub-pixel pitch: one sampled line per pixel row
+        step = max(1, int(math.ceil(1 / p)))  # sub-pixel pitch: one sampled row per pixel row
         adv = pitch[f] * char_aspect * s
         bar_h = max(p, 1) - 1
         for j in range(a, b, step):
-            ln = min(int(line_len[j]), int(cap[f]))
-            ind = min(int(line_indent[j]), ln)
+            ln = int(row_len[j])
+            ind = min(int(row_indent[j]), ln)
             if ln <= ind:
                 continue
-            lx, ly = line_pos[j, 0] * s, line_pos[j, 1] * s
+            lx, ly = row_pos[j, 0] * s, row_pos[j, 1] * s
             dr.rectangle([lx + ind * adv, ly, lx + ln * adv, ly + bar_h], fill=bar)
             n_bars += 1
     try:
@@ -307,50 +361,31 @@ def parse_aspect(text):
     return float(text)
 
 
-def main():
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("atlas", metavar="ATLAS_DIR", help="data/<name>_atlas with index.npz + index.json")
-    ap.add_argument("--aspect", default="16:9", help="world aspect W:H (default 16:9)")
-    ap.add_argument("--metric", choices=["tokens", "references", "chars", "lines", "bytes"],
-                    default="tokens",
-                    help="file size metric for the treemap (default tokens; references needs "
-                         "resolve.npz from atlas_resolve.py)")
-    ap.add_argument("--char-aspect", type=float, default=None,
-                    help="character advance / line pitch of the font (default: atlas_font.py's "
-                         "metric for its default font, Menlo 0.569; 0.6 if that font is missing)")
-    ap.add_argument("--preview", default=None, metavar="PNG",
-                    help="render the layout with Pillow at 2400 px wide")
-    ap.add_argument("--preview-width", type=int, default=2400,
-                    help="preview width in pixels (default 2400)")
-    args = ap.parse_args()
-    if args.char_aspect is None:
-        args.char_aspect = default_char_aspect()
+METRICS = ["tokens", "references", "lines", "chars", "bytes"]
 
-    t0 = time.time()
-    z = np.load(os.path.join(args.atlas, "index.npz"))
-    with open(os.path.join(args.atlas, "index.json")) as f:
-        meta = json.load(f)
+
+def file_metric(name, z, files, file_line0, atlas):
+    if name == "tokens":
+        return file_tokens(z["kinds"], z["line_off"], file_line0)
+    if name == "references":
+        rp = Path(atlas) / "resolve.npz"
+        if not rp.exists():
+            return None
+        return np.load(rp)["file_refs_in"].astype(np.float64)
+    if name == "chars":
+        return z["file_chars"].astype(np.float64)
+    if name == "lines":
+        return np.diff(file_line0).astype(np.float64)
+    return np.array([f["bytes"] for f in files], np.float64)
+
+
+def build_layout(args, z, meta, metric_name, metric, t0):
     dirs, files = meta["dirs"], meta["files"]
     file_line0, line_len, line_indent = z["file_line0"], z["line_len"], z["line_indent"]
     file_dir = z["file_dir"]
     n_files, n_lines, n_dirs = len(files), len(line_len), len(dirs)
-
     aspect = parse_aspect(args.aspect)
     world = np.array([WORLD_W, WORLD_W / aspect])
-    if args.metric == "tokens":
-        metric = file_tokens(z["kinds"], z["line_off"], file_line0)
-    elif args.metric == "references":
-        rp = Path(args.atlas) / "resolve.npz"
-        if not rp.exists():
-            raise SystemExit(f"error: --metric references needs {rp}; run ./atlas_resolve.py {args.atlas}")
-        metric = np.load(rp)["file_refs_in"].astype(np.float64)
-    elif args.metric == "chars":
-        metric = z["file_chars"].astype(np.float64)
-    elif args.metric == "lines":
-        metric = np.diff(file_line0).astype(np.float64)
-    else:
-        metric = np.array([f["bytes"] for f in files], np.float64)
     weight = np.maximum(metric, 1.0)          # an empty file still gets a sliver
 
     dir_rect, dir_pad, file_rect = layout_tree(dirs, weight, file_dir, world)
@@ -366,38 +401,88 @@ def main():
     file_hue = dir_hue[file_dir]
 
     pitch, cols, rows, cap, colw = layout_files(file_rect, file_line0, line_len, args.char_aspect)
-    line_pos = line_positions(file_rect, file_line0, pitch, rows, colw, n_lines)
-    irect, iitem = item_rects(z["item_file"], z["item_start"], z["item_end"], file_rect,
-                              file_line0, pitch, rows, colw)
+    line_row0, row_line, row_col0, row_len, row_first = wrap_rows(file_line0, line_len, cap)
+    file_row0 = line_row0[file_line0]
+    row_pos = row_positions(file_rect, file_row0, pitch, rows, colw, row_first, args.char_aspect)
+    row_indent = np.where(row_first, line_indent[row_line], 0)
+    # items in rows: the first row of the start line to the first row of the end line
+    f = z["item_file"].astype(np.int64)
+    n_lines_f = np.diff(file_line0).astype(np.int64)
+    gs = file_line0[f].astype(np.int64) + np.minimum(z["item_start"].astype(np.int64), n_lines_f[f])
+    ge = file_line0[f].astype(np.int64) + np.minimum(z["item_end"].astype(np.int64), n_lines_f[f])
+    s_row = line_row0[gs] - file_row0[f]
+    e_row = line_row0[ge] - file_row0[f]
+    irect, iitem = item_rects(z["item_file"], s_row, e_row, file_rect, file_row0, pitch, rows, colw)
 
-    np.savez(os.path.join(args.atlas, "layout.npz"),
+    suffix = "" if metric_name == "tokens" else "_" + metric_name
+    np.savez(os.path.join(args.atlas, f"layout{suffix}.npz"),
              world=world.astype(np.float64),
              dir_rect=dir_rect.astype(np.float64), dir_pad=dir_pad.astype(np.float64),
              dir_depth=dir_depth.astype(np.uint16), dir_hue=dir_hue.astype(np.uint8),
              file_rect=file_rect.astype(np.float64), file_pitch=pitch.astype(np.float64),
              file_cols=cols.astype(np.uint16), file_rows=rows.astype(np.uint32),
              file_cap=cap.astype(np.uint16), file_colw=colw.astype(np.float64),
-             file_hue=file_hue.astype(np.uint8),
-             line_pos=line_pos.astype(np.float32),
+             file_hue=file_hue.astype(np.uint8), file_row0=file_row0.astype(np.uint32),
+             line_row0=line_row0.astype(np.uint32), row_line=row_line.astype(np.uint32),
+             row_col0=row_col0.astype(np.uint16), row_len=row_len.astype(np.uint16),
+             row_pos=row_pos.astype(np.float32),
              item_rect=irect.astype(np.float32), item_rect_item=iitem.astype(np.uint32))
     jdirs = []
     for d in range(n_dirs):
         label = meta["name"] if d == 0 else os.path.basename(dirs[d]["path"]) + "/"
         jdirs.append({"label": label, "rect": [float(v) for v in dir_rect[d]],
                       "depth": int(dir_depth[d]), "hue": int(dir_hue[d])})
-    with open(os.path.join(args.atlas, "layout.json"), "w") as f:
+    with open(os.path.join(args.atlas, f"layout{suffix}.json"), "w") as fh:
         json.dump({"world": [float(world[0]), float(world[1])], "aspect": args.aspect,
-                   "metric": args.metric, "char_aspect": args.char_aspect, "dirs": jdirs}, f)
+                   "metric": metric_name, "char_aspect": args.char_aspect, "hang": HANG,
+                   "dirs": jdirs}, fh)
 
     sides = np.minimum(file_rect[:, 2] - file_rect[:, 0], file_rect[:, 3] - file_rect[:, 1])
-    print(f"{args.atlas}: {n_files} files, {n_dirs} dirs, {n_lines} lines, {len(irect)} item rects; "
+    n_rows = len(row_line)
+    print(f"{args.atlas} [{metric_name}]: {n_files} files, {n_dirs} dirs, {n_lines} lines in "
+          f"{n_rows} rows ({n_rows - n_lines} wrapped), {len(irect)} item rects; "
           f"world {world[0]:.0f}x{world[1]:.1f}, pitch {pitch.min():.4f}..{pitch.max():.3f} "
           f"(median {np.median(pitch):.3f}), columns 1..{cols.max()} (mean {cols.mean():.2f}), "
           f"{int((sides < 0.02).sum())} slivers under 0.02, {time.time() - t0:.2f}s")
-    if args.preview:
+    if args.preview and metric_name == (args.metric if args.metric != "all" else "tokens"):
         render_preview(args.preview, world, jdirs, dir_rect, dir_pad, dir_hue, file_rect,
-                       file_hue, pitch, cols, rows, cap, colw, file_line0, line_pos, line_len,
-                       line_indent, args.char_aspect, args.preview_width)
+                       file_hue, pitch, cols, rows, cap, colw, file_row0, row_pos, row_len,
+                       row_indent, args.char_aspect, args.preview_width)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("atlas", metavar="ATLAS_DIR", help="data/<name>_atlas with index.npz + index.json")
+    ap.add_argument("--aspect", default="16:9", help="world aspect W:H (default 16:9)")
+    ap.add_argument("--metric", choices=["all"] + METRICS, default="all",
+                    help="file size metric for the treemap; 'all' (default) writes layout.npz "
+                         "(tokens) plus layout_references.npz (when resolve.npz exists) and "
+                         "layout_lines.npz, which the viewer switches between")
+    ap.add_argument("--char-aspect", type=float, default=None,
+                    help="character advance / line pitch of the font (default: atlas_font.py's "
+                         "metric for its default font, Menlo 0.569; 0.6 if that font is missing)")
+    ap.add_argument("--preview", default=None, metavar="PNG",
+                    help="render the tokens layout with Pillow at 2400 px wide")
+    ap.add_argument("--preview-width", type=int, default=2400,
+                    help="preview width in pixels (default 2400)")
+    args = ap.parse_args()
+    if args.char_aspect is None:
+        args.char_aspect = default_char_aspect()
+
+    t0 = time.time()
+    z = np.load(os.path.join(args.atlas, "index.npz"))
+    with open(os.path.join(args.atlas, "index.json")) as f:
+        meta = json.load(f)
+    names = ["tokens", "references", "lines"] if args.metric == "all" else [args.metric]
+    for name in names:
+        metric = file_metric(name, z, meta["files"], z["file_line0"], args.atlas)
+        if metric is None:
+            if args.metric == "all":
+                continue
+            raise SystemExit(f"error: --metric references needs {args.atlas}/resolve.npz; "
+                             f"run ./atlas_resolve.py {args.atlas}")
+        build_layout(args, z, meta, name, metric, t0)
 
 
 if __name__ == "__main__":

@@ -9,13 +9,14 @@ Regenerate everything with:
 ./atlas_index.py makepad/draw makepad/platform --out data/makepad-draw_atlas
 ./atlas_resolve.py data/big-picture_atlas
 ./atlas_resolve.py data/makepad-draw_atlas
-./atlas_layout.py data/big-picture_atlas --preview docs/shots/big-picture_layout.png
+./atlas_layout.py data/big-picture_atlas --preview docs/shots/big-picture_layout.png   # writes the tokens, references and lines layouts
 ./atlas_layout.py data/makepad-draw_atlas --preview docs/shots/makepad-draw_layout.png
 ./atlas_viewer.py data/big-picture_atlas --shots docs/shots/big-picture --filter Viewer --stats
 ./atlas_viewer.py data/makepad-draw_atlas --shots docs/shots/makepad-draw --filter Window --stats
 ./atlas_viewer.py data/makepad-draw_atlas --inspector --frames 1 --screenshot docs/shots/makepad-draw/coverage.png
 ./atlas_viewer.py data/makepad-draw_atlas --inspect Window --frames 2 --screenshot docs/shots/makepad-draw/inspector.png
 ./atlas_viewer.py data/makepad-draw_atlas --hover platform/src/os/linux/x11/x11_sys.rs:8:12 --frames 2 --screenshot docs/shots/makepad-draw/hover_symbol.png
+./atlas_viewer.py data/big-picture_atlas --goto c/stb_image.h:120 --zoom 14 --frames 2 --screenshot docs/shots/big-picture/wrapped.png
 ./atlas_viewer.py data/big-picture_atlas --goto vt_viewer.py:569 --zoom 120 --frames 3 --screenshot docs/shots/big-picture/text_120_raster.png
 ./atlas_viewer.py data/big-picture_atlas --goto vt_viewer.py:569 --zoom 120 --frames 3 --screenshot docs/shots/big-picture/text_120_vector.png --vector-text
 ```
@@ -36,6 +37,7 @@ Regenerate everything with:
 - `big-picture/hover.png`: the text view with the cursor at the window centre: the hovered file gets the light fill and the label `c/vt_core.c:26 function smoothstep01` (path, line, enclosing item).
 - `big-picture/filter.png`: the fitted map with the filter `Viewer` applied: the one hit file outlined in yellow, every other file dimmed, the results panel listing 1 definition (`class Viewer`, tagged `class`) and 1 reference, the status line reading `1 definitions · 1 references · 1 files · 0/2`.
 - `big-picture/result.png`: after stepping to result 1: the fly-to landed on `class Viewer:` in `vt_viewer.py` at the text rung with the hit box filled yellow, the file's 3 px yellow border, the current row highlighted in the panel and the counter at `1/2`.
+- `big-picture/wrapped.png`: `--goto c/stb_image.h:120 --zoom 14`: the credits block's long lines wrapped inside their column, continuation rows hanging in by two characters.
 - `big-picture/text_120_raster.png`: `vt_viewer.py:569` at 120 px per line drawn from the 64 px raster atlas: the magnified glyphs are visibly soft.
 - `big-picture/text_120_vector.png`: the same view with `--vector-text`: above 40 px per line the glyphs come from the Dobbie vector-texture tier and are crisp at any magnification.
 
@@ -47,6 +49,7 @@ Regenerate everything with:
 - `makepad-draw/text.png`: 16 px per line: legible Rust with struct, enum and impl outlines.
 - `makepad-draw/hover.png`: the same view hovered at the centre: label `platform/src/draw_shader.rs:232 enum DrawShaderInputPacking`.
 - `makepad-draw/filter.png`: the fitted map with the filter `Window`: 31 hit files outlined in yellow at the overview, the rest dimmed, the panel populated with 1 definition (`pub type Window = XID`) and 147 references grouped by file, the status line `1 definitions · 147 references · 31 files · 0/148`.
+- `makepad-draw/references.png`: the map laid out by the references metric (`--shots` takes it after the results; the toolbar or M switches live): the x11 bindings and the script VM grow, the generated code shrinks.
 - `makepad-draw/coverage.png`: the Inspector with nothing selected (`--inspector`): the resolver's coverage block, one line per resolution status with its count.
 - `makepad-draw/inspector.png`: the Inspector on the enum variant `Window` (`--inspect Window`): kind and name, path and line, the enclosing enum, the definition and reference counts, and the references grouped by file, each a click away.
 - `makepad-draw/hover_symbol.png`: the cursor held on `Window` in x11_sys.rs at text zoom: the label reads the resolver's view, `type Window · 2 definitions · 102 references`.
