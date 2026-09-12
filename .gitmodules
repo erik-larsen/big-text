@@ -7,3 +7,6 @@
 [submodule "dagcmp"]
 	path = dagcmp
 	url = https://github.com/erik-larsen/dagcmp.git
+[submodule "hepr"]
+	path = hepr
+	url = https://github.com/soadzoor/Highly-Efficient-PDF-Renderer.git
