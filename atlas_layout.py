@@ -492,7 +492,7 @@ def parse_aspect(text):
     return float(text)
 
 
-METRICS = ["tokens", "references", "lines", "chars", "bytes"]
+METRICS = ["tokens", "references", "churn", "lines", "chars", "bytes"]
 
 
 def file_metric(name, z, files, file_line0, atlas):
@@ -503,6 +503,14 @@ def file_metric(name, z, files, file_line0, atlas):
         if not rp.exists():
             return None
         return np.load(rp)["file_refs_in"].astype(np.float64)
+    if name == "churn":
+        hp = Path(atlas) / "history.npz"
+        if not hp.exists():
+            return None
+        hz = np.load(hp)
+        # lines added plus removed over the whole history, floored at 1 so
+        # an untouched file keeps a sliver
+        return np.maximum(hz["file_added"].astype(np.float64) + hz["file_removed"], 1.0)
     if name == "chars":
         return z["file_chars"].astype(np.float64)
     if name == "lines":
@@ -622,14 +630,14 @@ def main():
     z = np.load(os.path.join(args.atlas, "index.npz"))
     with open(os.path.join(args.atlas, "index.json")) as f:
         meta = json.load(f)
-    names = ["tokens", "references", "lines"] if args.metric == "all" else [args.metric]
+    names = ["tokens", "references", "churn", "lines"] if args.metric == "all" else [args.metric]
     for name in names:
         metric = file_metric(name, z, meta["files"], z["file_line0"], args.atlas)
         if metric is None:
             if args.metric == "all":
                 continue
-            raise SystemExit(f"error: --metric references needs {args.atlas}/resolve.npz; "
-                             f"run ./atlas_resolve.py {args.atlas}")
+            need = "history.npz; run ./atlas_history.py" if name == "churn" else "resolve.npz; run ./atlas_resolve.py"
+            raise SystemExit(f"error: --metric {name} needs {args.atlas}/{need} {args.atlas}")
         if args.lens in ("folders", "all"):
             build_layout(args, z, meta, name, metric, t0)
     if args.lens in ("layers", "all"):

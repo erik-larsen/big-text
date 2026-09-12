@@ -34,6 +34,11 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import atlas_font  # noqa: E402
+import atlas_history  # noqa: E402
+import shutil  # noqa: E402
+import subprocess  # noqa: E402
+import tempfile  # noqa: E402
+from datetime import datetime, timezone  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 CHARS_W = 16384          # width of tex_chars / tex_kinds, shared with line.glsl
@@ -76,6 +81,7 @@ YELLOW = rgb("e8d44d")
 UI_TEXT = rgb("e6e6e6")
 UI_BOX = rgb("2a2a2e")
 UI_DIM = rgb("8c909a")
+TEAL_UI = rgb("5fb7b7")      # the compare revision on the rail, the neighbour teal
 
 
 # ---------------------------------------------------------------- GL helpers
@@ -163,6 +169,10 @@ def instanced_vao(quad_vbo, attribs):
 
 # ---------------------------------------------------------------- data
 
+def rev_date(t):
+    return datetime.fromtimestamp(int(t), timezone.utc).strftime("%Y-%m-%d")
+
+
 def check_atlas(d):
     d = Path(d)
     missing = [n for n in ("index.npz", "index.json", "layout.npz", "layout.json")
@@ -179,7 +189,8 @@ LAYOUT_KEYS = ("world", "dir_rect", "dir_pad", "dir_depth", "dir_hue", "file_rec
                "file_cols", "file_rows", "file_cap", "file_colw", "file_hue", "file_row0",
                "line_row0", "row_line", "row_col0", "row_len", "row_pos", "item_rect",
                "item_rect_item", "layout")
-METRIC_ORDER = ["tokens", "references", "lines", "chars", "bytes"]
+METRIC_ORDER = ["tokens", "references", "churn", "lines", "chars", "bytes"]
+LENSES = ["none", "churn", "age", "changes"]   # the colour lenses, C cycles them
 
 
 def load_layouts(d):
@@ -391,9 +402,23 @@ class Viewer:
                             else getattr(args, "metric", None))
         a = self.a
         self.res = load_resolve(args.atlas, a)
-        self.metrics = [m for m in METRIC_ORDER if m in a["layouts"]]
-        self.has_layers = "layers" in a["layouts"]
-        self.folders_metric = a["metric"] if a["metric"] != "layers" else "tokens"
+        # history (phase 5): the colour lenses and the revision rail
+        self.hist = atlas_history.load(args.atlas)
+        self.head_dir = str(args.atlas)
+        self.head = (a, self.res)          # the atlas on disk, to return to from a revision
+        self.head_paths = {f["path"]: i for i, f in enumerate(a["index"]["files"])}
+        self.rev_i = 0                     # index into the revision table, 0 = newest = HEAD
+        self.compare_i = None              # the second revision of the Changes lens
+        self.rev_loading = None            # revision index while a thread indexes it
+        self.rev_q = queue.Queue()
+        self.color = getattr(args, "color", None) or "none"
+        self.since_days = getattr(args, "since", None)
+        self.rail_show = bool(getattr(args, "history", False))
+        self.rail_rect = None
+        self.rail_xs = np.zeros(0)
+        self.rail_hover = None
+        self.removed = []
+        self.filter_text = ""
         self.hang = int(a["layout"].get("hang", 2))
         # projection: 2d is orthographic; 3d is a perspective camera that
         # orbits the focus point (cx, cy) at tilt and yaw, with files and
@@ -407,38 +432,11 @@ class Viewer:
         self.M_inv = np.eye(4)
         self.focus_w = 1.0
         self.z_focus = 0.0            # height the 3D camera orbits: the file top under the centre
-        self.n_files = len(a["file_rect"])
-        self.n_lines = len(a["line_file"])
-        self.n_rows = len(a["row_pos"])
-        self.n_dirs = len(a["dir_rect"])
-        self.file_scale = np.ones(self.n_files)
-        self.dir_scale = np.ones(self.n_dirs)
-        self.compute_heights()
-        self.n_chars = len(a["chars"])
         self.W, self.H = (float(v) for v in a["world"])
         self.A = float(a["layout"].get("char_aspect", 0.6))
         self.name = a["index"].get("name", Path(args.atlas).name)
-        self.paths = [f["path"] for f in a["index"]["files"]]
-        self.langs = [f.get("lang") for f in a["index"]["files"]]
-        self.refresh_dirs()
-        self.sel = np.zeros(self.n_files, bool)       # selected files
-        self.nb = np.zeros(self.n_files, bool)        # their neighbourhood in the file graph
         self.marquee = None
-        self.item_names = [it["name"] for it in a["index"]["items"]]
-        self.build_dir_tags()
-        self.item_rect_file = a["item_file"][a["item_rect_item"]]
-        order = np.argsort(a["item_file"], kind="stable")
-        bounds = np.searchsorted(a["item_file"][order], np.arange(self.n_files + 1))
-        self.items_by_file = [order[bounds[f]:bounds[f + 1]] for f in range(self.n_files)]
-        self.build_hover_grid()
-        # the typical pitch: that of the file holding the median line
-        order = np.argsort(a["file_pitch"], kind="stable")
-        per_file = np.diff(a["file_line0"])[order]
-        mid = min(int(np.searchsorted(np.cumsum(per_file), per_file.sum() / 2)), len(order) - 1)
-        self.median_pitch = float(a["file_pitch"][order[mid]])
-        if self.n_chars > CHARS_W * CHARS_W:
-            raise SystemExit(f"error: {self.n_chars} characters exceed the "
-                             f"{CHARS_W}x{CHARS_W} texture; the resident design stops here")
+        self.attach_atlas(a, self.res)
         self.glyphs, self.gm = atlas_font.build_atlas(args.font, args.font_index, 64)
         self.ui_aspect = self.gm["cell_w"] / self.gm["cell_h"]
         self.vt = load_vector_tier(args.font, args.font_index) if args.vector_text else None
@@ -485,6 +483,326 @@ class Viewer:
         self.rung = np.zeros(self.n_files, np.uint8)
         self.visible = np.zeros(self.n_files, bool)
         self.fit()
+
+    # ---- the corpus -----------------------------------------------------
+    def attach_atlas(self, a, res):
+        """Everything derived from the atlas on the CPU. Called once at start
+        and again when a revision replaces the corpus."""
+        self.a, self.res = a, res
+        self.metrics = [m for m in METRIC_ORDER if m in a["layouts"]]
+        self.has_layers = "layers" in a["layouts"]
+        self.folders_metric = a["metric"] if a["metric"] != "layers" else "tokens"
+        self.n_files = len(a["file_rect"])
+        self.n_lines = len(a["line_file"])
+        self.n_rows = len(a["row_pos"])
+        self.n_dirs = len(a["dir_rect"])
+        self.file_scale = np.ones(self.n_files)
+        self.dir_scale = np.ones(self.n_dirs)
+        self.compute_heights()
+        self.n_chars = len(a["chars"])
+        if self.n_chars > CHARS_W * CHARS_W:
+            raise SystemExit(f"error: {self.n_chars} characters exceed the "
+                             f"{CHARS_W}x{CHARS_W} texture; the resident design stops here")
+        self.paths = [f["path"] for f in a["index"]["files"]]
+        self.langs = [f.get("lang") for f in a["index"]["files"]]
+        self.refresh_dirs()
+        self.sel = np.zeros(self.n_files, bool)       # selected files
+        self.nb = np.zeros(self.n_files, bool)        # their neighbourhood in the file graph
+        self.selected = None
+        self.item_names = [it["name"] for it in a["index"]["items"]]
+        self.build_dir_tags()
+        self.item_rect_file = a["item_file"][a["item_rect_item"]]
+        order = np.argsort(a["item_file"], kind="stable")
+        bounds = np.searchsorted(a["item_file"][order], np.arange(self.n_files + 1))
+        self.items_by_file = [order[bounds[f]:bounds[f + 1]] for f in range(self.n_files)]
+        self.build_hover_grid()
+        # the typical pitch: that of the file holding the median line
+        order = np.argsort(a["file_pitch"], kind="stable")
+        per_file = np.diff(a["file_line0"])[order]
+        mid = min(int(np.searchsorted(np.cumsum(per_file), per_file.sum() / 2)), len(order) - 1)
+        self.median_pitch = float(a["file_pitch"][order[mid]])
+        self.hits_by_file = np.zeros(self.n_files, bool)
+        self.hit_count = np.zeros(self.n_files, np.int64)
+        self.dimmed = np.zeros(self.n_files, bool)
+        self.current_file = -1
+        self.result_i = -1
+        self.results = None
+        self.result_rows = []
+        self.rung = np.zeros(self.n_files, np.uint8)
+        self.visible = np.zeros(self.n_files, bool)
+        self.compute_lens()
+
+    def swap_atlas(self, a, res):
+        """Replace the corpus with another revision's atlas (or HEAD's) and
+        rebuild every GPU texture: a hard cut, as with the layouts. The
+        world is the same size, so the camera stays; the filter re-runs on
+        the new corpus; the selection is cleared (file indices change)."""
+        self.attach_atlas(a, res)
+        glDeleteTextures(2, [self.tex_chars, self.tex_kinds])
+        chars = padded_rows(a["chars"], CHARS_W)
+        self.tex_chars = texture_2d(GL_R8UI, GL_RED_INTEGER, GL_UNSIGNED_BYTE, chars)
+        self.tex_kinds = texture_2d(GL_R8UI, GL_RED_INTEGER, GL_UNSIGNED_BYTE,
+                                    padded_rows(a["kinds"], CHARS_W))
+        self.upload_layout()
+        glDeleteTextures(1, [self.tex_file_u])
+        self.file_u = padded_rows(np.zeros((self.n_files, 4), np.uint8), TEX_W)
+        self.tex_file_u = texture_2d(GL_RGBA8UI, GL_RGBA_INTEGER, GL_UNSIGNED_BYTE, self.file_u)
+        self.bind_textures()
+        self.hover = None
+        self.z_focus = 0.0
+        self.marquee = None
+        self.panel_scroll = 0
+        self.refresh_panel()
+        if len(self.filter_text) >= 2:
+            self.set_filter(self.filter_text, sync=self.scripted)
+
+    # ---- history: colour lenses and the revision rail ----------------------
+    def head_index(self):
+        """Per file of the loaded corpus, its index in HEAD's file table (the
+        history arrays are HEAD-indexed), or -1 for a file HEAD no longer has."""
+        if self.rev_i == 0:
+            return np.arange(self.n_files)
+        return np.array([self.head_paths.get(p, -1) for p in self.paths], np.int64)
+
+    def compute_lens(self):
+        """The per-file value in [0, 1] and class of the active colour lens,
+        for the two free channels of the file's third texel."""
+        n = self.n_files
+        self.lens_v = np.zeros(n, np.float32)
+        self.lens_c = np.zeros(n, np.float32)
+        self.removed = []
+        self.change_counts = (0, 0, 0)
+        h = self.hist
+        if h is None or self.color == "none":
+            return
+        hi = self.head_index()
+        ok = hi >= 0
+        src = hi[ok]
+        if self.color == "churn":
+            c = atlas_history.churn(h, None if not self.since_days else self.since_days * 86400)
+            self.lens_v[ok] = np.log1p(c[src]) / max(math.log1p(float(c.max())), 1e-9)
+        elif self.color == "age":
+            # by rank among tracked files, newest 1: a linear ramp over time
+            # is nearly flat for an active repo, where most files were
+            # touched in the last few months
+            last = h["file_last"]
+            tracked = last > 0
+            if tracked.any():
+                rank = np.zeros(len(last))
+                order = np.argsort(last[tracked], kind="stable")
+                rank[np.flatnonzero(tracked)[order]] = np.arange(1, tracked.sum() + 1) / tracked.sum()
+                self.lens_v[ok] = rank[src]
+        elif self.color == "changes" and self.compare_i is not None:
+            n_lines = np.diff(self.head[0]["file_line0"])
+            cls, val, rem = atlas_history.changes_between(h, self.rev_i, self.compare_i, n_lines=n_lines)
+            self.lens_c[ok] = cls[src]
+            self.lens_v[ok] = val[src]
+            self.removed = rem
+            self.change_counts = (int((cls[src] == 1).sum()), int((cls[src] == 2).sum()), len(rem))
+
+    def upload_lens(self):
+        """Re-upload the file texture with the lens channels (one small upload)."""
+        self.ff[2::3, 2] = self.lens_v
+        self.ff[2::3, 3] = self.lens_c
+        buf = padded_rows(self.ff, TEX_W)
+        glBindTexture(GL_TEXTURE_2D, self.tex_file_f)
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, buf.shape[1], buf.shape[0], GL_RGBA, GL_FLOAT, buf)
+        self.bind_textures()
+
+    def set_color(self, name):
+        if self.hist is None or name not in LENSES:
+            return
+        self.color = name
+        self.compute_lens()
+        self.upload_lens()
+        self.refresh_panel()
+
+    def set_compare(self, i):
+        """Shift-click on the rail: the second revision of the Changes lens
+        (the same revision again clears it)."""
+        if self.hist is None:
+            return
+        self.compare_i = None if i == self.compare_i else int(i)
+        if self.compare_i is not None and self.color != "changes":
+            self.color = "changes"
+        self.compute_lens()
+        self.upload_lens()
+        self.refresh_panel()
+
+    def lens_code(self):
+        """uLens for the file shader: 0 unless a lens has something to show."""
+        if self.hist is None or self.color == "none":
+            return 0
+        if self.color == "changes" and self.compare_i is None:
+            return 0
+        return LENSES.index(self.color)
+
+    def rev_label(self, i):
+        r = self.hist["json"]["revisions"][i]
+        return f"{r['short']} {rev_date(r['time'])}"
+
+    def lens_status(self):
+        parts = []
+        if self.rev_loading is not None:
+            parts.append(f"indexing {self.hist['json']['revisions'][self.rev_loading]['short']}…")
+        elif self.rev_i != 0:
+            parts.append(f"at {self.rev_label(self.rev_i)}")
+        if self.color == "churn":
+            parts.append("churn · " + (f"last {self.since_days} days" if self.since_days else "all history"))
+        elif self.color == "age":
+            parts.append(f"age · newest {rev_date(int(self.hist['rev_time'][0]))}")
+        elif self.color == "changes":
+            if self.compare_i is None:
+                parts.append("changes · Shift-click the rail to pick a revision")
+            else:
+                a, c, r = self.change_counts
+                old, new = max(self.rev_i, self.compare_i), min(self.rev_i, self.compare_i)
+                parts.append(f"changes · {self.hist['json']['revisions'][old]['short']} → "
+                             f"{'HEAD' if new == 0 else self.hist['json']['revisions'][new]['short']} · "
+                             f"{a} added · {c} changed · {r} removed")
+        return " · ".join(parts)
+
+    def rail_rev_at(self, sx):
+        if not len(self.rail_xs):
+            return None
+        return int(np.argmin(np.abs(self.rail_xs - sx)))
+
+    def rail_hover_text(self):
+        r = self.hist["json"]["revisions"][self.rail_hover]
+        return f"{r['short']} {rev_date(r['time'])} · {r['author']} · {r['subject']}"
+
+    def rev_dir(self, i):
+        return Path(self.head_dir) / "rev" / self.hist["json"]["revisions"][i]["short"]
+
+    def load_revision(self, i, sync=False):
+        """Load the corpus at revision i of the table: HEAD's atlas for 0, a
+        cached atlas under rev/<short>/ when it exists, else extract, index
+        and lay out in a thread (or here, when sync) and swap when done."""
+        if self.hist is None or self.rev_loading is not None:
+            return
+        i = int(i)
+        if i == self.rev_i:
+            return
+        if i == 0:
+            self.rev_i = 0
+            self.swap_atlas(*self.head)
+            return
+        d = self.rev_dir(i)
+        if (d / "layout.npz").exists():
+            self.rev_i = i
+            self.swap_atlas(load_atlas(d, "tokens"), None)
+            return
+        self.rev_loading = i
+        if sync:
+            self.build_revision(i, d)
+            self.poll_revision()
+            return
+        threading.Thread(target=self.build_revision, args=(i, d), daemon=True).start()
+
+    def build_revision(self, i, d):
+        """Thread body: git archive the revision into a temporary directory
+        outside this repository (so the indexer walks it rather than asking
+        git), index it into d, lay it out with the tokens metric."""
+        j = self.hist["json"]
+        rev = j["revisions"][i]
+        prefix = j["prefix"]
+        specs = [prefix + s if s != "." else (prefix.rstrip("/") or ".") for s in j["pathspecs"]]
+        try:
+            if not (d / "index.npz").exists():
+                tmp = Path(tempfile.mkdtemp(prefix="big-text-rev-"))
+                try:
+                    archive = subprocess.Popen(["git", "-C", j["toplevel"], "archive", rev["hash"], "--"] + specs,
+                                               stdout=subprocess.PIPE)
+                    subprocess.run(["tar", "-x", "-C", str(tmp)], stdin=archive.stdout, check=True)
+                    archive.wait()
+                    if archive.returncode:
+                        raise RuntimeError(f"git archive exited {archive.returncode}")
+                    srcs = [str(tmp / s) if s != "." else str(tmp) for s in specs]
+                    d.mkdir(parents=True, exist_ok=True)
+                    subprocess.run([sys.executable, str(HERE / "atlas_index.py"), *srcs, "--out", str(d),
+                                    "--name", self.name], check=True, capture_output=True, text=True)
+                finally:
+                    shutil.rmtree(tmp, ignore_errors=True)
+            subprocess.run([sys.executable, str(HERE / "atlas_layout.py"), str(d), "--metric", "tokens",
+                            "--lens", "folders"], check=True, capture_output=True, text=True)
+            self.rev_q.put((i, d, None))
+        except subprocess.CalledProcessError as e:
+            self.rev_q.put((i, d, (e.stderr or str(e)).strip()[-400:]))
+        except Exception as e:                      # noqa: BLE001
+            self.rev_q.put((i, d, str(e)))
+
+    def poll_revision(self):
+        while True:
+            try:
+                i, d, err = self.rev_q.get_nowait()
+            except queue.Empty:
+                return
+            self.rev_loading = None
+            if err:
+                print(f"revision {self.hist['json']['revisions'][i]['short']}: {err}", file=sys.stderr)
+                continue
+            self.rev_i = i
+            self.swap_atlas(load_atlas(d, "tokens"), None)
+
+    def history_rows(self):
+        """The Inspector with nothing selected and a history: the loaded and
+        compare revisions, the lens, and the files removed between them."""
+        h, width = self.hist, self.panel_chars()
+        j = h["json"]
+        rows = [(f"History · {len(j['revisions'])} revisions", YELLOW, -1),
+                (f"at {self.rev_label(self.rev_i)}{' HEAD' if self.rev_i == 0 else ''}", UI_TEXT, -1)]
+        if self.compare_i is not None:
+            rows.append((f"vs {self.rev_label(self.compare_i)}", UI_TEXT, -1))
+        rows.append((f"lens {self.color}", UI_TEXT, -1))
+        st = j["stats"]
+        rows.append((f"{st['tracked']} tracked · {st['untracked']} untracked", UI_DIM, -1))
+        if self.color == "changes" and self.compare_i is not None:
+            a, c, r = self.change_counts
+            rows.append(("", UI_DIM, -1))
+            rows.append((f"{a} added · {c} changed", UI_TEXT, -1))
+            rows.append((f"{r} removed", UI_TEXT, -1))
+            if self.removed:
+                rows.append((f"Removed ({len(self.removed)})", YELLOW, -1))
+                for o, ri in self.removed[:100]:
+                    rows.append((self.short_path(j["unindexed"][o], width), UI_DIM, -1))
+                    rows.append((f"      {j['revisions'][ri]['short']} {j['revisions'][ri]['subject']}"[:width], UI_DIM, -1))
+                if len(self.removed) > 100:
+                    rows.append((f"… {len(self.removed) - 100} more", UI_DIM, -1))
+        elif self.color == "changes":
+            rows.append(("Shift-click the rail to", UI_DIM, -1))
+            rows.append(("pick a revision to compare", UI_DIM, -1))
+        rows.append(("", UI_DIM, -1))
+        rows.append(("H: the rail · C: the lens", UI_DIM, -1))
+        rows.append(("click a file for its history", UI_DIM, -1))
+        return rows
+
+    def file_history_rows(self):
+        """Per selected file (the first three): commits, dates, lines added
+        and removed, and the newest five commits touching it."""
+        h = self.hist
+        if h is None:
+            return []
+        j, width = h["json"], self.panel_chars()
+        hi = self.head_index()
+        rows = []
+        for f in np.flatnonzero(self.sel)[:3]:
+            g = int(hi[f])
+            rows.append((f"History · {self.short_path(self.paths[f], width - 10)}", YELLOW, -1))
+            if g < 0 or h["file_commits"][g] == 0:
+                rows.append(("not in HEAD's history" if g < 0 else "untracked", UI_DIM, -1))
+                continue
+            rows.append((f"{int(h['file_commits'][g])} commits · +{int(h['file_added'][g])} -{int(h['file_removed'][g])}", UI_TEXT, -1))
+            rows.append((f"{rev_date(int(h['file_first'][g]))} to {rev_date(int(h['file_last'][g]))}"[:width], UI_DIM, -1))
+            entries = np.flatnonzero(h["rev_file"] == g)
+            revs = np.searchsorted(h["rev_ptr"], entries, side="right") - 1
+            for e, ri in list(zip(entries, revs))[:5]:
+                r = j["revisions"][int(ri)]
+                rows.append((f"{r['short']} {rev_date(r['time'])} +{int(h['rev_added'][e])} -{int(h['rev_removed'][e])}"[:width], UI_DIM, -1))
+                rows.append((f"   {r['subject']}"[:width], UI_DIM, -1))
+        if self.rev_i != 0:
+            rows.append(("(HEAD's history; the map is", UI_DIM, -1))
+            rows.append((f" at {self.rev_label(self.rev_i)})", UI_DIM, -1))
+        return rows
 
     # ---- window ---------------------------------------------------------
     def open_window(self):
@@ -661,6 +979,9 @@ class Viewer:
         ff[1::3, 3] = a["file_hue"]
         ff[2::3, 0] = self.file_z0
         ff[2::3, 1] = self.file_h
+        ff[2::3, 2] = self.lens_v
+        ff[2::3, 3] = self.lens_c
+        self.ff = ff
         buf = padded_rows(ff, TEX_W)
         self.tex_file_f = texture_2d(GL_RGBA32F, GL_RGBA, GL_FLOAT, buf)
         gpu += buf.nbytes
@@ -1023,7 +1344,7 @@ class Viewer:
             self.fly = None
             self.zoom_vel = 0.0
             self.tilting = bool(mods & glfw.MOD_ALT)
-            over_ui = any(rc and in_rect(sx, sy, rc) for rc in [self.panel_rect, self.filter_rect]
+            over_ui = any(rc and in_rect(sx, sy, rc) for rc in [self.panel_rect, self.filter_rect, self.rail_rect]
                           + [r for r, _ in self.toolbar])
             if (mods & glfw.MOD_SHIFT) and button == glfw.MOUSE_BUTTON_LEFT and not over_ui:
                 self.marquee = [sx, sy, sx, sy]       # Shift-drag selects a rectangle
@@ -1040,11 +1361,19 @@ class Viewer:
                     self.click(sx, sy, toggle=True)   # Shift-click toggles one file
                 self.marquee = None
             elif not moved and button == glfw.MOUSE_BUTTON_LEFT:
-                self.click(sx, sy)
+                self.click(sx, sy, toggle=bool(mods & glfw.MOD_SHIFT))   # Shift over the rail: compare
             self.drag = None
             self.press = None
 
     def click(self, sx, sy, toggle=False):
+        if self.rail_rect and in_rect(sx, sy, self.rail_rect):
+            i = self.rail_rev_at(sx)
+            if i is not None:
+                if toggle:
+                    self.set_compare(i)          # Shift-click: the compare revision
+                else:
+                    self.load_revision(i)
+            return
         for rect, act in self.toolbar:
             if in_rect(sx, sy, rect):
                 if act[0] == "metric":
@@ -1053,6 +1382,10 @@ class Viewer:
                     self.set_proj(act[1])
                 elif act[0] == "lens":
                     self.set_lens(act[1])
+                elif act[0] == "color":
+                    self.set_color(act[1])
+                elif act[0] == "history":
+                    self.rail_show = not self.rail_show
                 return
         if self.filter_rect and in_rect(sx, sy, self.filter_rect):
             self.filter_focus = True
@@ -1160,6 +1493,18 @@ class Viewer:
             self.step(1)
         elif key == glfw.KEY_LEFT_BRACKET:
             self.step(-1)
+        elif key == glfw.KEY_C and self.hist is not None:
+            self.set_color(LENSES[(LENSES.index(self.color) + 1) % len(LENSES)])
+        elif key == glfw.KEY_H and self.hist is not None:
+            self.rail_show = not self.rail_show
+        elif key in (glfw.KEY_LEFT, glfw.KEY_RIGHT) and self.rail_show and self.hist is not None:
+            d = 1 if key == glfw.KEY_LEFT else -1           # left is older, a larger index
+            n = len(self.hist["rev_time"])
+            if mods & glfw.MOD_SHIFT:
+                base = self.compare_i if self.compare_i is not None else self.rev_i
+                self.set_compare(int(np.clip(base + d, 0, n - 1)))
+            else:
+                self.load_revision(int(np.clip(self.rev_i + d, 0, n - 1)))
         elif key == glfw.KEY_R:
             self.fit()
         elif key == glfw.KEY_3:
@@ -1167,9 +1512,9 @@ class Viewer:
         elif key == glfw.KEY_M and len(self.metrics) > 1:
             i = self.metrics.index(self.a["metric"])
             self.set_metric(self.metrics[(i + 1) % len(self.metrics)])
-        elif key == glfw.KEY_I and self.res is not None:
+        elif key == glfw.KEY_I and (self.res is not None or self.hist is not None):
             self.toggle_inspector()
-        elif key == glfw.KEY_TAB and self.res is not None:
+        elif key == glfw.KEY_TAB and (self.res is not None or self.hist is not None):
             self.toggle_inspector()
         elif key == glfw.KEY_SLASH:
             self.filter_focus = True
@@ -1295,13 +1640,14 @@ class Viewer:
         with a tab line on top when both exist. A row's third element is
         a result index, -1 for none, or an action tuple."""
         have_results = bool(self.result_rows)
+        have_inspector = self.res is not None or self.hist is not None
         rows = []
-        if self.inspector_open and self.res is not None:
+        if self.inspector_open and have_inspector:
             if have_results:
                 rows.append(("[Inspector]  Results", YELLOW, ("tab",)))
             rows += self.inspector_rows()
         elif have_results:
-            if self.res is not None:
+            if have_inspector:
                 rows.append((" Inspector  [Results]", YELLOW, ("tab",)))
             rows += self.result_rows
         self.panel_rows = rows
@@ -1311,6 +1657,8 @@ class Viewer:
         e = self.selected
         if e is None and self.sel.any():
             return self.selection_rows()
+        if e is None and self.hist is not None and (res is None or self.color == "changes"):
+            return self.history_rows()
         if e is None:
             st = res["stats"]
             rows = [(f"Coverage · {st['crates']} crates", YELLOW, -1),
@@ -1431,6 +1779,7 @@ class Viewer:
                          ("goto", int(f), int(self.a["file_line0"][f]), 0)))
         if len(files) > 60:
             rows.append((f"… {len(files) - 60} more", UI_DIM, -1))
+        rows += self.file_history_rows()          # git history of the first few, before the graph
         if res is not None:
             uses = np.zeros(self.n_files, bool)
             used = np.zeros(self.n_files, bool)
@@ -1748,7 +2097,7 @@ class Viewer:
         flags = np.zeros(self.n_files, np.uint8)
         cur = self.cursor_override if self.scripted else self.cursor
         over_ui = cur is not None and any(rc and in_rect(cur[0], cur[1], rc)
-                                          for rc in [self.panel_rect, self.filter_rect]
+                                          for rc in [self.panel_rect, self.filter_rect, self.rail_rect]
                                           + [r for r, _ in self.toolbar])
         self.hover = (self.hover_at(*cur) if cur is not None and self.drag is None
                       and not over_ui else None)
@@ -2003,6 +2352,9 @@ class Viewer:
                   + ([("Layers", ("lens", "layers"), lens == "layers")] if self.has_layers else []),
                   [("2D", ("proj", "2d"), self.proj != "3d"), ("3D", ("proj", "3d"), self.proj == "3d")],
                   [(mt.capitalize(), ("metric", mt), mt == self.a["metric"]) for mt in self.metrics]]
+        if self.hist is not None:
+            groups.append([(name.capitalize(), ("color", name), self.color == name) for name in LENSES])
+            groups.append([("History", ("history",), self.rail_show)])
         for gi, group in enumerate(groups):
             if gi:
                 tx += m
@@ -2024,6 +2376,66 @@ class Viewer:
         box(m, self.fb_h - m - size - 2 * pad * 0.6, m + bw, self.fb_h - m, UI_BOX, 0.85)
         label(m + pad, self.fb_h - m - size - pad * 0.6, self.crumb)
 
+        # the revision rail above the crumb trail: time left to right, one
+        # tick per commit, the loaded revision in yellow, the compare
+        # revision in teal, year labels where there is room
+        self.rail_rect = None
+        self.rail_hover = None
+        cur = self.cursor_override if self.scripted else self.cursor
+        if self.rail_show and self.hist is not None and len(self.hist["rev_time"]):
+            rh = 22 * s
+            rx0, rx1 = m, self.map_w - m
+            ry1 = self.fb_h - m - (size + 2 * pad * 0.6) - m
+            ry0 = ry1 - rh
+            self.rail_rect = (rx0, ry0, rx1, ry1)
+            box(rx0, ry0, rx1, ry1, UI_BOX, 0.85)
+            t = self.hist["rev_time"]
+            t0, t1 = int(t[-1]), int(t[0])
+            span = max(t1 - t0, 1)
+            inner0, inner1 = rx0 + 6 * s, rx1 - 6 * s
+            self.rail_xs = inner0 + (t - t0) / span * (inner1 - inner0)
+            for x in self.rail_xs:
+                box(x, ry0 + 8 * s, x + max(1.0, s), ry1 - 3 * s, UI_DIM, 0.7)
+            # year labels along the top edge
+            y0 = datetime.fromtimestamp(t0, timezone.utc).year
+            y1 = datetime.fromtimestamp(t1, timezone.utc).year
+            last_x = -1e9
+            for yr in range(y0 + 1, y1 + 1):
+                ts = datetime(yr, 1, 1, tzinfo=timezone.utc).timestamp()
+                x = inner0 + (ts - t0) / span * (inner1 - inner0)
+                if x - last_x < 4 * len(str(yr)) * cws:
+                    continue
+                box(x, ry0 + 2 * s, x + max(1.0, s), ry0 + 8 * s, UI_DIM, 0.9)
+                label(x + 2 * s, ry0 + 1 * s, str(yr), small, UI_DIM)
+                last_x = x
+            marks = [(self.rev_i, YELLOW)]
+            if self.compare_i is not None:
+                marks.append((self.compare_i, TEAL_UI))
+            if self.rev_loading is not None:
+                marks.append((self.rev_loading, UI_TEXT))
+            tags = []                  # (x0, x1, row) of the tags placed so far
+            th = ry1 - 1 * s - (ry0 + 9 * s)
+            for i, col in marks:
+                x = self.rail_xs[i]
+                box(x - 1 * s, ry0 + 5 * s, x + 2 * s, ry1 - 2 * s, col, 1.0)
+                tag = ("HEAD " if i == 0 else "") + self.rev_label(i)
+                tw = len(tag) * cws + 2 * pad
+                right, left = x + 5 * s, x - 5 * s - tw
+                # right of the marker inside the rail, else left, else the
+                # same two places on a row above the rail (when one tag
+                # spans the other's marker both inside places collide)
+                for tx, row in ((right, 0), (left, 0), (right, 1), (left, 1)):
+                    if tx < rx0 or tx + tw > rx1:
+                        continue
+                    if not any(r == row and tx < b1 and tx + tw > b0 for b0, b1, r in tags):
+                        break
+                tags.append((tx, tx + tw, row))
+                ty = ry0 + 9 * s - row * (th + 3 * s)
+                box(tx, ty, tx + tw, ty + th, UI_BOX, 0.95)
+                label(tx + pad, ty + 1 * s, tag, small, col)
+            if cur is not None and in_rect(cur[0], cur[1], self.rail_rect):
+                self.rail_hover = self.rail_rev_at(cur[0])
+
         # the right column: status line, filter box, results panel. With the
         # panel open the column is its own strip beside the map and the
         # status wraps to the panel's width; otherwise the status line and
@@ -2036,8 +2448,11 @@ class Viewer:
             n_def = int(self.results["is_def"].sum())
             status = (f"{n_def} definitions · {n - n_def} references · "
                       f"{int(self.hits_by_file.sum())} files · {self.result_i + 1}/{n}")
+        extra = ""                    # the lens and revision, on its own line over the map
+        if self.hist is not None and (self.color != "none" or self.rev_i != 0 or self.rev_loading is not None):
+            extra = self.lens_status()
         if self.panel_rows:
-            parts = wrap_parts(status, self.panel_chars())
+            parts = wrap_parts(status + (" · " + extra if extra else ""), self.panel_chars())
             row_h = small + 2 * s
             sy1 = m + len(parts) * row_h + 2 * pad * 0.6
             box(cx0, m, cx1, sy1, UI_BOX, 0.85)
@@ -2049,6 +2464,11 @@ class Viewer:
             box(self.fb_w - m - bw, m, self.fb_w - m, m + size + 2 * pad * 0.6, UI_BOX, 0.85)
             label(self.fb_w - m - bw + pad, m + pad * 0.6, status)
             fy0 = m + size + 2 * pad * 0.6 + m
+            if extra:
+                bw = len(extra) * cw + 2 * pad
+                box(self.fb_w - m - bw, fy0, self.fb_w - m, fy0 + size + 2 * pad * 0.6, UI_BOX, 0.85)
+                label(self.fb_w - m - bw + pad, fy0 + pad * 0.6, extra, color=YELLOW)
+                fy0 += size + 2 * pad * 0.6 + m
         fy1 = fy0 + size + 2 * pad * 0.6
         self.filter_rect = (cx0, fy0, cx1, fy1)
         box(*self.filter_rect, UI_BOX, 0.85)
@@ -2081,8 +2501,8 @@ class Viewer:
         else:
             self.panel_rect = None
 
-        # hover label next to the cursor
-        text = self.hover_label()
+        # hover label next to the cursor (the rail's revision when over the rail)
+        text = self.rail_hover_text() if self.rail_hover is not None else self.hover_label()
         cur = self.cursor_override if self.scripted else self.cursor
         if text and cur is not None:
             bw = len(text) * cw + 2 * pad
@@ -2117,6 +2537,7 @@ class Viewer:
             self.draw_instanced("wall", 4 * (self.n_files + self.n_dirs))
         glUseProgram(self.prog["file"])
         glUniform1i(self.uniform("file", "uRingOnly"), 0)
+        glUniform1i(self.uniform("file", "uLens"), self.lens_code())
         self.draw_instanced("file", self.n_files)
         self.draw_rects(self.band_instances())      # kind bands under the bars
         self.draw_visible_lines()
@@ -2144,6 +2565,7 @@ class Viewer:
     def frame(self, dt):
         t = time.perf_counter()
         self.poll_search()
+        self.poll_revision()
         self.update_glide(dt)
         self.update_fly()
         self.render()
@@ -2160,9 +2582,26 @@ class Viewer:
                   f"max {ft.max():.2f} ms")
 
     # ---- runs -----------------------------------------------------------
+    def rev_index(self, spec):
+        """A revision table index from a hash prefix or ~N (N back from HEAD)."""
+        if self.hist is None:
+            raise SystemExit(f"error: --rev/--compare need {self.head_dir}/history.npz; run ./atlas_history.py {self.head_dir}")
+        revs = self.hist["json"]["revisions"]
+        if spec.startswith("~") and spec[1:].isdigit():
+            return min(int(spec[1:]), len(revs) - 1)
+        m = [i for i, r in enumerate(revs) if r["hash"].startswith(spec)]
+        if len(m) != 1:
+            raise SystemExit(f"error: revision '{spec}' matches {len(m)} commits in the table")
+        return m[0]
+
     def apply_script_flags(self):
         args = self.args
         held = False
+        if getattr(args, "compare", None):
+            self.set_compare(self.rev_index(args.compare))
+        if getattr(args, "rev", None):
+            self.load_revision(self.rev_index(args.rev), sync=True)
+            held = True
         if args.goto:
             self.goto(args.goto, complete=True)
             self.settle_focus()
@@ -2302,6 +2741,25 @@ class Viewer:
             self.clear_selection()
             self.toggle_inspector(False)
             self.set_lens("folders")
+        if self.hist is not None:
+            for name in ("churn", "age"):
+                self.set_color(name)
+                self.fit()
+                snap(f"{name}.png")
+            back = min(100, len(self.hist["rev_time"]) - 1)
+            if back > 0:
+                self.rail_show = True
+                self.set_compare(back)
+                self.fit()
+                snap("changes.png")
+                self.compare_i = None
+                self.set_color("none")
+                self.load_revision(back, sync=True)
+                self.fit()
+                snap("history.png")
+                self.load_revision(0)
+                self.rail_show = False
+            self.set_color("none")
         if self.args.stats:
             self.print_stats()
 
@@ -2394,6 +2852,15 @@ def main():
                     help="open the Inspector on the first entity of that name (needs resolve.npz)")
     ap.add_argument("--hover", default=None, metavar="PATH:LINE:COL",
                     help="fly there and hold the cursor on that cell (for screenshots)")
+    ap.add_argument("--color", default=None, choices=LENSES[1:],
+                    help="start with a colour lens (needs history.npz from atlas_history.py); C cycles them")
+    ap.add_argument("--since", type=int, default=None, metavar="DAYS",
+                    help="window the churn lens to the last DAYS days (default: all history)")
+    ap.add_argument("--history", action="store_true", help="show the revision rail; H toggles it")
+    ap.add_argument("--rev", default=None, metavar="HASH",
+                    help="load the corpus at this commit (a hash prefix, or an index into the table like ~100)")
+    ap.add_argument("--compare", default=None, metavar="HASH",
+                    help="the second revision of the Changes lens (hash prefix or ~N)")
     ap.add_argument("--shots", default=None, metavar="DIR",
                     help="write the standard screenshot set to DIR and exit")
     ap.add_argument("--stats", action="store_true",

@@ -65,11 +65,12 @@ Python 3.12 with numpy, Pillow, PyOpenGL, glfw, fontTools and tree-sitter with i
 
 ## Run
 
-Four steps: index a source tree, resolve its names, lay it out, view it. Everything generated lands under `data/`, which git ignores. The resolve step is optional; without it the filter is a plain word search and there is no Inspector.
+Five steps: index a source tree, resolve its names, read its git history, lay it out, view it. Everything generated lands under `data/`, which git ignores. The resolve and history steps are optional; without resolve the filter is a plain word search and there is no Inspector, without history there are no colour lenses and no revision rail.
 
 ```bash
 ./atlas_index.py big-picture
 ./atlas_resolve.py data/big-picture_atlas
+./atlas_history.py data/big-picture_atlas
 ./atlas_layout.py data/big-picture_atlas
 ./atlas_viewer.py data/big-picture_atlas
 ```
@@ -79,11 +80,12 @@ That is 19 files and 15,216 lines, indexed and laid out in well under a second. 
 ```bash
 ./atlas_index.py makepad/draw makepad/platform --out data/makepad-draw_atlas
 ./atlas_resolve.py data/makepad-draw_atlas
+./atlas_history.py data/makepad-draw_atlas
 ./atlas_layout.py data/makepad-draw_atlas
 ./atlas_viewer.py data/makepad-draw_atlas
 ```
 
-`--vector-text` switches the glyphs above 40 device pixels per line to the Dobbie vector tier (crisp at any magnification; the first run builds the curve atlas in about two seconds). `--goto path:line`, `--zoom PX_PER_LINE`, `--filter WORD`, `--step K`, `--frames N --screenshot out.png`, `--shots DIR` and `--stats` script the viewer for screenshots and timing; `docs/shots/README.md` lists the commands that made the images below.
+`--vector-text` switches the glyphs above 40 device pixels per line to the Dobbie vector tier (crisp at any magnification; the first run builds the curve atlas in about two seconds). `--goto path:line`, `--zoom PX_PER_LINE`, `--filter WORD`, `--step K`, `--color churn|age|changes`, `--rev HASH`, `--compare HASH`, `--history`, `--frames N --screenshot out.png`, `--shots DIR` and `--stats` script the viewer for screenshots and timing; `docs/shots/README.md` lists the commands that made the images below.
 
 ## Controls
 
@@ -103,6 +105,8 @@ That is 19 files and 15,216 lines, indexed and laid out in well under a second. 
 | Click a file | Select it: its neighbours in the file graph light up in teal, the rest dim, the Inspector lists uses and used-by |
 | `Shift` + click / `Shift` + drag | Toggle a file in the selection / select every file in a rectangle |
 | `Alt` + drag | Tilt (vertical) and turn (horizontal) the 3D camera; from 2D it switches to 3D |
+| Toolbar or `C` | Cycle the colour lens: None, Churn (lines added and removed, ember), Age (time since the last commit, teal), Changes (added green, changed amber, against the compare revision) |
+| `H` or the `History` button | Show the revision rail along the bottom: one tick per commit, oldest left. Click loads the corpus at that commit (re-indexed in a thread, cached on disk, a hard cut when ready); `Shift` + click sets the compare revision; `Left` / `Right` step by one commit, with `Shift` the compare revision |
 | `R` | Refit the map |
 | `Escape` | Clear the filter, then the selection |
 
@@ -157,6 +161,23 @@ The two glyph tiers at 120 pixels per line: the 64 pixel raster atlas magnified 
 ![raster glyphs at 120 px](docs/shots/big-picture/text_120_raster.png)
 ![vector glyphs at 120 px](docs/shots/big-picture/text_120_vector.png)
 
+The colour lenses over the fitted map: churn (lines added and removed over the whole history, log scale, in ember) and age (rank by last commit, newest in teal). The bars and glyphs are untouched; only the file fill carries the lens.
+
+![churn lens](docs/shots/makepad-draw/churn.png)
+![age lens](docs/shots/makepad-draw/age.png)
+
+Changes between the commit 100 back and HEAD, with the revision rail along the bottom: 78 files added in green, 203 changed in amber by the fraction of their lines touched, the two revisions tagged on the rail, and the status line carrying the counts, which equal `git diff --name-status` between the two.
+
+![changes lens](docs/shots/makepad-draw/changes.png)
+
+The corpus loaded at that commit, 415 files instead of 493, re-indexed from `git archive` in under a second and cached: the toolbar keeps only what a past revision has (no resolver, so no Layers, References or Inspector entities), and the map keeps the camera.
+
+![a past revision](docs/shots/makepad-draw/history.png)
+
+A file selected with the Changes lens on: the Inspector shows its commits, dates, lines added and removed, and its newest five commits before its Uses and Used-by lists.
+
+![file history](docs/shots/makepad-draw/history_file.png)
+
 ## Implementation
 
 The contract that the code was built against is [docs/DESIGN.md](docs/DESIGN.md), including the deviations found while building. The short version:
@@ -170,10 +191,11 @@ The contract that the code was built against is [docs/DESIGN.md](docs/DESIGN.md)
 - **Fly-to** is van Wijk and Nuij's smooth zoom-and-pan, which zooms out and back in between distant places.
 - **Layers and selection.** The resolver's references give a file graph, A to B when a reference in A resolves into B. The Layers lens runs Tarjan on it, condenses the cycles, ranks each component by its longest path down to a file that references nothing in the corpus, and lays the ranks out as rows (highest on top, heights by weight to the 0.6 so a giant cycle does not squeeze the others), cycles as groups inside their row and files keeping the hue of their real directory; the crumb trail reads "layer 3 · 355 files › cycle". A click selects a file, Shift-click toggles, Shift-drag marquees; the selection's neighbourhood (both directions) is lit in teal, everything else dims, and the Inspector lists the selected files with their in and out degrees, then the files they use and the files that use them.
 - **3D.** Every world shader takes one model-view-projection matrix, orthographic in 2D and perspective in 3D, so the flat view is unchanged. In 3D the camera orbits a focus point at tilt and yaw, at a distance chosen so one world unit at the focus is still the same number of pixels as in 2D, which keeps the zoom semantics and the per-file rung: a file's pixels per line is foreshortened by its depth, so one frame has text near and bars far. Directories are terraces of five world units per level, files rise from their terrace by the square root of the current metric, an instanced wall pass draws the four sides of every rectangle shaded by which way they face, and the focus height rides on the roof of the file under the centre so a close camera never ends up inside a building. Picking unprojects the cursor onto that roof; labels are billboards at projected corners.
+- **History.** `atlas_history.py` runs one `git log --numstat` over the indexed directories (half a second for the 724 commits touching makepad's draw and platform crates) and writes per-file commit counts, lines added and removed, first and last commit times, and a per-revision table of the files each commit touched, so everything windowed is computed in the viewer without calling git. Renames are not followed; a rename is a removal and an addition. Churn becomes a fourth area metric, so it also drives the 3D heights. The colour lenses tint the file fill only, so the ladder reads the same at every rung: churn on a log scale in ember, age in teal, and changes between the loaded revision and a compare revision picked on the rail, added files green and changed files amber by the fraction of their lines touched, removed files counted in the status line and listed in the Inspector because they have no rectangle to light. The rail loads a revision by extracting it with `git archive`, indexing and laying it out with the tokens metric into a cache under the atlas, then swapping every GPU texture; the world is the same size so the camera stays, the filter re-runs, the selection clears. A past revision has no resolver, so the metric buttons, the Layers lens and the entity views are greyed until HEAD is loaded again. The Inspector gains a History block per selected file: commits, first and last dates, lines added and removed, the newest five commits.
 
-Measured on an M4 MacBook at a 2940 by 1658 framebuffer, `--frames 300 --stats` over the scripted zoom from fit to text: big-picture 1.2 ms mean and 3.4 ms 99th percentile; makepad-draw 1.6 and 4.4 ms; the full makepad tree 4.5 and 23.7 ms, the tail being the fitted view where all 3.67 million lines are visible, and 1.3 ms once zoomed to text.
+Measured on an M4 MacBook at a 2940 by 1658 framebuffer, `--frames 300 --stats` over the scripted zoom from fit to text: big-picture 1.2 ms mean and 3.4 ms 99th percentile; makepad-draw 1.6 and 4.4 ms, or 2.1 and 6.3 with the churn lens and the rail; the full makepad tree 4.5 and 23.7 ms, the tail being the fitted view where all 3.67 million lines are visible, and 1.3 ms once zoomed to text. A past revision of makepad-draw loads in 0.8 s from scratch and instantly from the cache.
 
-Not built: history, the palette and legend buttons, and a streaming working set (the whole corpus is resident, which is fine to a few million lines).
+Not built: the palette and legend buttons, and a streaming working set (the whole corpus is resident, which is fine to a few million lines).
 
 ## Decisions so far
 
@@ -219,12 +241,13 @@ big-text/
   notes/makepad-code-atlas.md  what the public makepad history and the video say about the code atlas
   atlas_index.py               source tree -> data/<name>_atlas/index.npz + index.json
   atlas_resolve.py             tree-sitter entities and lexically resolved references -> resolve.npz + resolve.json
-  atlas_layout.py              index -> layout.npz (tokens), layout_references.npz, layout_lines.npz, layout_layers.npz (+ --preview PNG)
+  atlas_history.py             git log --numstat over the indexed directories -> history.npz + history.json
+  atlas_layout.py              index -> layout.npz (tokens), layout_references.npz, layout_churn.npz, layout_lines.npz, layout_layers.npz (+ --preview PNG)
   atlas_font.py                monospace font -> raster glyph atlas
   atlas_viewer.py              the viewer
   vt_glyphs.py                 the vector-texture glyph tier's atlas builder (Dobbie's format)
   shaders/                     GLSL 330, one file per program (dir, file, line, rect, text, wall, vt_glyph)
-  tests/                       layout invariants, viewer input, vector glyph accuracy, a synthetic atlas
+  tests/                       layout invariants, viewer input, vector glyph accuracy, a synthetic atlas, history (a throwaway repo, and the rail driven by synthetic input)
   fonts/                       the default face and its OFL licence (planned)
   data/                        generated atlases and glyph caches (gitignored)
   dobbie/                      Dobbie's two demos for parity: README, fetch script and checksums (the files themselves will move to gitignored, fetched on demand; see Copyright path)

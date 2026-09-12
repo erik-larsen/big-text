@@ -9,14 +9,16 @@ Regenerate everything with:
 ./atlas_index.py makepad/draw makepad/platform --out data/makepad-draw_atlas
 ./atlas_resolve.py data/big-picture_atlas
 ./atlas_resolve.py data/makepad-draw_atlas
+./atlas_history.py data/makepad-draw_atlas
 ./atlas_layout.py data/big-picture_atlas --preview docs/shots/big-picture_layout.png   # writes the tokens, references and lines layouts
 ./atlas_layout.py data/makepad-draw_atlas --preview docs/shots/makepad-draw_layout.png
 ./atlas_viewer.py data/big-picture_atlas --shots docs/shots/big-picture --filter Viewer --stats
-./atlas_viewer.py data/makepad-draw_atlas --shots docs/shots/makepad-draw --filter Window --stats
+./atlas_viewer.py data/makepad-draw_atlas --shots docs/shots/makepad-draw --filter Window --stats    # also churn, age, changes, history
 ./atlas_viewer.py data/makepad-draw_atlas --proj 3d --tilt 55 --yaw 12 --hover platform/src/os/linux/x11/x11_sys.rs:8:12 --frames 2 --screenshot docs/shots/makepad-draw/3d_text.png
 ./atlas_viewer.py data/makepad-draw_atlas --inspector --frames 1 --screenshot docs/shots/makepad-draw/coverage.png
 ./atlas_viewer.py data/makepad-draw_atlas --inspect Window --frames 2 --screenshot docs/shots/makepad-draw/inspector.png
 ./atlas_viewer.py data/makepad-draw_atlas --hover platform/src/os/linux/x11/x11_sys.rs:8:12 --frames 2 --screenshot docs/shots/makepad-draw/hover_symbol.png
+./atlas_viewer.py data/makepad-draw_atlas --compare '~100' --history --select platform/src/os/linux/vulkan.rs --frames 1 --screenshot docs/shots/makepad-draw/history_file.png
 ./atlas_viewer.py data/big-picture_atlas --goto c/stb_image.h:120 --zoom 14 --frames 2 --screenshot docs/shots/big-picture/wrapped.png
 ./atlas_viewer.py data/big-picture_atlas --goto vt_viewer.py:569 --zoom 120 --frames 3 --screenshot docs/shots/big-picture/text_120_raster.png
 ./atlas_viewer.py data/big-picture_atlas --goto vt_viewer.py:569 --zoom 120 --frames 3 --screenshot docs/shots/big-picture/text_120_vector.png --vector-text
@@ -58,6 +60,11 @@ Regenerate everything with:
 - `makepad-draw/selection.png`: the file with the highest fan-in (x11_sys.rs) selected in the Layers lens: its 224 dependants lit in teal, the rest dimmed, the Inspector listing them.
 - `makepad-draw/coverage.png`: the Inspector with nothing selected (`--inspector`): the resolver's coverage block, one line per resolution status with its count.
 - `makepad-draw/inspector.png`: the Inspector on the enum variant `Window` (`--inspect Window`): kind and name, path and line, the enclosing enum, the definition and reference counts, and the references grouped by file, each a click away.
+- `makepad-draw/churn.png`: the fitted map with the churn lens: every file's fill tinted ember by the log of its lines added and removed over the whole history; the linux and web platform code and the generated bindings are the hottest, the status line reads `churn · all history`.
+- `makepad-draw/age.png`: the age lens: fill by rank of the last commit, newest teal, the oldest untouched files dark; the status line names the newest commit's date.
+- `makepad-draw/changes.png`: the Changes lens between the commit 100 back (`1f6b12f`) and HEAD with the rail shown: added files green, changed files amber by the fraction of lines touched, the two revisions tagged on the rail, the status `changes · 1f6b12f → HEAD · 78 added · 203 changed · 0 removed`, equal to `git diff --name-status` for the two directories.
+- `makepad-draw/history.png`: the corpus loaded at `1f6b12f` (415 files, 221,045 lines), the rail tagging it, the status `at 1f6b12f 2026-07-30`, the toolbar reduced to what a past revision has.
+- `makepad-draw/history_file.png`: `vulkan.rs` selected with the Changes lens on: the Inspector's History block under the selection (commits, dates, lines, newest five commits) before the Uses and Used-by lists.
 - `makepad-draw/hover_symbol.png`: the cursor held on `Window` in x11_sys.rs at text zoom: the label reads the resolver's view, `type Window · 2 definitions · 102 references`.
 - `makepad-draw/result.png`: after stepping to result 1: the fly-to ends on `pub type Window = XID;` at 41 px per line with the hit box, the 3 px file border and the crumb trail `← makepad-draw › platform › src › os › linux › x11`.
 

@@ -1,6 +1,6 @@
 # Parity with the Studio code atlas
 
-The plan for reaching everything the video and the makepad commit messages show, as a checklist. Each row is one observation from `notes/makepad-code-atlas.md`, its state in the current build (commit 3634cc1, 2026-09-12), and the phase that closes it. A phase is done when every row it owns is checked against a screenshot or a scripted test, not when the code exists. The phases are ordered so each unlocks the next; sizes are single-session, sequential work.
+The plan for reaching everything the video and the makepad commit messages show, as a checklist. Each row is one observation from `notes/makepad-code-atlas.md`, its state in the current build (after phase 5, 2026-09-12), and the phase that closes it. A phase is done when every row it owns is checked against a screenshot or a scripted test, not when the code exists. The phases are ordered so each unlocks the next; sizes are single-session, sequential work.
 
 ## Checklist
 
@@ -34,13 +34,13 @@ The plan for reaching everything the video and the makepad commit messages show,
 | 26 | Size lens in 2D, 2.5D and 3D; hard lens switch | done: 2D and 3D, hard switch; 2.5D (perspective without heights) not separate | |
 | 27 | Alt-drag tilts; 3D extrudes files and directories by the height metric (References) with shaded walls in the hue; labels as billboards; the ladder still draws on slab tops | done (heights from whichever metric is selected; directories as depth terraces) | |
 | 28 | Layers lens: dependency ranks with SCC aggregates and rank labels | done (rank rows, cycles grouped, rank labels with file counts) | |
-| 29 | History lens: revision scrub rail, spatial diff, change lighting | missing | 5 |
+| 29 | History lens: revision scrub rail, spatial diff, change lighting | done: the rail re-indexes the corpus at a commit (cached), Changes lights added and changed files against a compare revision, churn and age as colour lenses, churn as a metric; the diff is a colour lens, not a re-layout | |
 | 30 | Crumb trail follows the view centre | done | |
 | 31 | Two retained draw lists moved by the camera alone, no regeneration on pan or zoom | done (resident textures, per-run draws) | |
-| 32 | Streaming working set with a device-derived budget for corpora beyond resident size | missing; 3.7 M lines resident is fine | 6 |
+| 32 | Streaming working set with a device-derived budget for corpora beyond resident size | missing; 3.7 M lines resident is fine | 7 |
 | 33 | Parallel deterministic index with progress | done (4 s for 3.7 M lines) | |
-| 34 | Search index served to agents over MCP with byte-admitted pages | missing | 7 |
-| 35 | Disk mode (a filesystem as the corpus) | missing | 7 |
+| 34 | Search index served to agents over MCP with byte-admitted pages | missing | 8 |
+| 35 | Disk mode (a filesystem as the corpus) | missing | 8 |
 | 36 | 120 Hz | 60 Hz vsync, 4.5 ms per frame on full makepad | not pursued |
 
 ## Phases
@@ -55,11 +55,13 @@ The plan for reaching everything the video and the makepad commit messages show,
 
 **Phase 4, Layers lens and selection (done).** Rows 23 and 28. The module graph from the resolver's `use` and `mod` edges, strongly connected components condensed, longest-path ranks as rows; click, Shift-click and marquee selection with the neighbourhood lit and the Inspector following.
 
-**Phase 5, History lens (1 session).** Row 29. `git log --numstat` per file for churn, a scrub rail that re-indexes at a chosen commit (4 s for all of makepad, so live enough), change lighting between two revisions, churn as a colour lens. This is also the recency heatmap from the lenses discussion.
+**Phase 5, History lens (done).** Row 29. `atlas_history.py` reads one `git log --numstat` into per-file churn and recency and a per-revision table; churn is a fourth metric; churn, age and changes are colour lenses on the file fill; the rail loads the corpus at a commit (`git archive`, index, layout, cached) and swaps every texture with the camera kept; change lighting between the loaded and a compare revision matches `git diff --name-status`. Contract and as-built notes in DESIGN.md.
 
-**Phase 6, scale (1 to 2 sessions).** Row 32. Per-file instance ranges with a byte budget, retirement of files off screen, so a corpus past ten million lines works. Only if a corpus that needs it exists.
+**Phase 6, the vector tier rewrite (1 session).** Not a parity row: the copyright step from the README's copyright path, which blocks going public. Rewrite `shaders/vt_glyph.glsl` around Slug's bands, sign-classification root rule, two-ray box filter and dynamic dilation (from the MIT reference shaders and the posts, not from Dobbie's `font.frag`), rebuild the atlas in `vt_glyphs.py` as bands widened by half the largest pixel, run the measurement plan of README question 2 (coverage error, frame time, sparkle at a hundred sub-pixel offsets, both shaders on the same font at 12, 32, 96 and 300 pixels per line) and delete the port only where Slug wins; move every file under `dobbie/` to fetch-on-demand through `fetch.sh` with checksums; switch the default face to JetBrains Mono NL under `fonts/` with its OFL and regenerate the screenshots.
 
-**Phase 7, optional (1 session each).** Rows 34 and 35: an MCP server that serves the index at the ladder's rungs under byte budgets; a filesystem indexer over a dagcmp scan.
+**Phase 7, scale (1 to 2 sessions).** Row 32. Per-file instance ranges with a byte budget, retirement of files off screen, so a corpus past ten million lines works. Only if a corpus that needs it exists.
+
+**Phase 8, optional (1 session each).** Rows 34 and 35: an MCP server that serves the index at the ladder's rungs under byte budgets; a filesystem indexer over a dagcmp scan.
 
 ## Ground rules
 
@@ -69,9 +71,9 @@ The plan for reaching everything the video and the makepad commit messages show,
 - Lenses are precomputed layouts swapped with a hard cut, which is also what Rik settled on after removing his morph.
 - No parallel agents unless a phase has a separable module and the spend is agreed first.
 
-## Where things stand (2026-09-12, after phase 4)
+## Where things stand (2026-09-12, after phase 5)
 
-Done: phases 0 to 4, rows 1 to 28 except the palette and legend buttons of row 24; 30 of the 36 rows are checked. Next: phase 5 (History), then 6 (streaming) and 7 (MCP, disk mode). Not pursued: 120 Hz, 2.5D as a mode of its own.
+Done: phases 0 to 5, rows 1 to 31 except the palette and legend buttons of row 24; 31 of the 36 rows are checked. Next: phase 6 (the vector tier rewrite on Slug, which is also the copyright step), then 7 (streaming) and 8 (MCP, disk mode). Not pursued: 120 Hz, 2.5D as a mode of its own.
 
 To resume in a fresh clone (the generated data is not in git):
 
@@ -82,15 +84,17 @@ git submodule update --init big-picture makepad
 ./atlas_index.py makepad/draw makepad/platform --out data/makepad-draw_atlas
 ./atlas_resolve.py data/big-picture_atlas
 ./atlas_resolve.py data/makepad-draw_atlas
+./atlas_history.py data/big-picture_atlas
+./atlas_history.py data/makepad-draw_atlas
 ./atlas_layout.py data/big-picture_atlas
 ./atlas_layout.py data/makepad-draw_atlas
 ./tests/gen_synthetic_atlas.py
-./tests/check_layout.py data/makepad-draw_atlas && ./tests/test_viewer_input.py && ./tests/test_vt_glyphs.py
+./tests/check_layout.py data/makepad-draw_atlas && ./tests/test_viewer_input.py && ./tests/test_vt_glyphs.py && ./tests/test_history.py && ./tests/test_viewer_history.py
 ./atlas_viewer.py data/makepad-draw_atlas --shots /tmp/shots --filter Window --stats
 ```
 
-Each phase so far: its contract was written into `docs/DESIGN.md` first ("as built" sections at the end), the code was patched in the main session with anchored edits, every behaviour was verified by a screenshot taken with the viewer's flags (`--goto`, `--zoom`, `--filter`, `--step`, `--inspect`, `--inspector`, `--hover`, `--select`, `--lens`, `--metric`, `--proj --tilt --yaw`, `--shots`) and read back, then `docs/shots/README.md`, the README and this file were updated and the phase was committed and pushed. Keep that shape.
+Each phase so far: its contract was written into `docs/DESIGN.md` first ("as built" sections at the end), the code was patched in the main session with anchored edits, every behaviour was verified by a screenshot taken with the viewer's flags (`--goto`, `--zoom`, `--filter`, `--step`, `--inspect`, `--inspector`, `--hover`, `--select`, `--lens`, `--metric`, `--proj --tilt --yaw`, `--color`, `--rev`, `--compare`, `--history`, `--shots`) and read back, then `docs/shots/README.md`, the README and this file were updated and the phase was committed and pushed. Keep that shape.
 
-Known rough edges, none blocking: the toolbar, status line and filter box overlay the map's corners rather than sitting in their own strip; in 3D the fitted view is a fixed tilt and yaw (55, 12 in the shots) and the labels of far directories can crowd; the Layers lens has no crossing minimisation within a row; the resolver's `ambiguous` and `not found` counts are large because there is no type inference (by design); the vector glyph tier is off unless `--vector-text` is given and switches at a fixed 40 px per line; screenshots differ by two pixels of framebuffer height between runs on this Mac.
+Known rough edges, none blocking: the toolbar, status line and filter box overlay the map's corners rather than sitting in their own strip; in 3D the fitted view is a fixed tilt and yaw (55, 12 in the shots) and the labels of far directories can crowd; the Layers lens has no crossing minimisation within a row; the resolver's `ambiguous` and `not found` counts are large because there is no type inference (by design); the vector glyph tier is off unless `--vector-text` is given and switches at a fixed 40 px per line; screenshots differ by two pixels of framebuffer height between runs on this Mac; the revision rail and the second status row (lens and revision) overlay the map like the crumb trail does, the fit reserves no space for them; a past revision has only the tokens layout and no resolver, so its metric buttons, Layers lens and entity views are unavailable until HEAD is loaded again.
 
-Phase 5 starts with a DESIGN.md contract for: `atlas_history.py` (git log --numstat per file into churn and recency arrays, and a list of revisions), a churn colour lens (a per-file colour texture, the same mechanism as the hues), the revision rail (re-index at a commit into a separate atlas directory and switch like a layout), and change lighting between two revisions (files added, removed, changed).
+Phase 6 starts with a DESIGN.md contract for the Slug rewrite of `shaders/vt_glyph.glsl` and the band atlas in `vt_glyphs.py`, the measurement harness comparing both shaders, the fetch-on-demand move of `dobbie/`, and the font switch; the README's question 2 and copyright path are the brief.

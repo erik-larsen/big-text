@@ -1,6 +1,6 @@
 // file.glsl: instanced file rectangles. Per instance: tex_file_f (RGBA32F,
 // three texels per file: rect, (pitch, colw, cap, hue), (z base, height,
-// 0, 0)) and tex_file_u (RGBA8UI, one texel per file: (rung, flags, step
+// lens value, lens class)) and tex_file_u (RGBA8UI, one texel per file: (rung, flags, step
 // lo, step hi); flags bit 0 hovered, bit 1 has hits, bit 2 current result,
 // bit 3 dimmed, bit 4 selected, bit 5 a neighbour of the selection).
 // Invisible files become a degenerate quad. Every rung draws
@@ -8,7 +8,9 @@
 // directory bands). The border is in device pixels, computed from the world
 // distance to the edge and fwidth so it holds in perspective: 1 grey, 2
 // yellow for hit files, 3 yellow for the current result. The ring pass
-// (uRingOnly) redraws just the border after the text.
+// (uRingOnly) redraws just the border after the text. uLens tints the fill
+// from the file's lens value and class (0 none, 1 churn, 2 age, 3 changes
+// where class 1 is an added file and 2 a changed one).
 #version 330 core
 layout(location = 0) in vec2 aQuad;
 uniform sampler2D uFileF;
@@ -24,6 +26,7 @@ flat out vec4 vRect;
 flat out ivec2 vRF;         // rung, flags
 flat out vec3 vTile;
 flat out int vRing;
+flat out vec2 vLensV;
 
 ivec2 tc(int i) { return ivec2(i & 4095, i >> 12); }
 
@@ -48,6 +51,7 @@ void main() {
     vRF = ivec2(int(fu.x), int(fu.y));
     vTile = uHue[int(meta.w) % 12];
     vRing = uRingOnly;
+    vLensV = zz.zw;
 }
 // ---- fragment ----
 #version 330 core
@@ -56,6 +60,8 @@ flat in vec4 vRect;
 flat in ivec2 vRF;
 flat in vec3 vTile;
 flat in int vRing;
+flat in vec2 vLensV;
+uniform int uLens;
 out vec4 frag;
 
 const vec3 BG     = vec3(0x1c, 0x1c, 0x1e) / 255.0;
@@ -64,6 +70,9 @@ const vec3 GREY   = vec3(0x8a, 0x8f, 0x9a) / 255.0;
 const vec3 YELLOW = vec3(0xe8, 0xd4, 0x4d) / 255.0;
 const vec3 HOVER  = vec3(0xdf, 0xe3, 0xec) / 255.0;
 const vec3 TEAL   = vec3(0x5f, 0xb7, 0xb7) / 255.0;
+const vec3 EMBER  = vec3(0xc8, 0x60, 0x40) / 255.0;
+const vec3 AMBER  = vec3(0xe0, 0xa0, 0x40) / 255.0;
+const vec3 GREEN  = vec3(0x7f, 0xbf, 0x7f) / 255.0;
 
 void main() {
     int rung = vRF.x, flags = vRF.y;
@@ -73,6 +82,13 @@ void main() {
     // every rung shares the file background: the hue lives in the directory
     // bands only, so the rung 0/1 cut does not flip a file's colour
     vec3 col = FILEBG;
+    // the colour lens tints the fill only; bands, bars and glyphs stay
+    if (uLens == 1) col = mix(col, EMBER, 0.65 * vLensV.x);
+    else if (uLens == 2) col = mix(col, TEAL, 0.65 * vLensV.x);
+    else if (uLens == 3) {
+        if (vLensV.y > 1.5) col = mix(col, AMBER, 0.15 + 0.5 * vLensV.x);
+        else if (vLensV.y > 0.5) col = mix(col, GREEN, 0.55);
+    }
     if (neighbour) col = mix(col, TEAL, 0.32);      // lit by the selection
     if (selected) col = mix(col, HOVER, 0.28);
     if (dimmed) col *= 0.5;
