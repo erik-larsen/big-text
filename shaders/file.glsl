@@ -1,22 +1,25 @@
 // file.glsl: instanced file rectangles. Per instance: tex_file_f (RGBA32F,
-// two texels per file: rect, then (pitch, colw, cap, hue)) and tex_file_u
-// (RGBA8UI, one texel per file: (rung, flags, 0, 0); flags bit 0 hovered,
-// bit 1 has hits, bit 2 current result, bit 3 dimmed). Invisible files
-// become a degenerate quad. Every rung draws the dark file background
-// under the lines (the hue is only in the directory bands). The border is in
-// device pixels: 1 grey, 2 yellow for hit files, 3 yellow for the current
-// result. Files thinner than a pixel are widened to one so slivers show.
+// three texels per file: rect, (pitch, colw, cap, hue), (z base, height,
+// 0, 0)) and tex_file_u (RGBA8UI, one texel per file: (rung, flags, step
+// lo, step hi); flags bit 0 hovered, bit 1 has hits, bit 2 current result,
+// bit 3 dimmed). Invisible files become a degenerate quad. Every rung draws
+// the dark file background under the lines (the hue is only in the
+// directory bands). The border is in device pixels, computed from the world
+// distance to the edge and fwidth so it holds in perspective: 1 grey, 2
+// yellow for hit files, 3 yellow for the current result. The ring pass
+// (uRingOnly) redraws just the border after the text.
 #version 330 core
 layout(location = 0) in vec2 aQuad;
 uniform sampler2D uFileF;
 uniform usampler2D uFileU;
 uniform int uRingOnly;      // 1: the border pass drawn after the lines
-uniform vec2 uOffset;
-uniform float uScale;
-uniform vec2 uViewport;
+uniform mat4 uMVP;
+uniform vec4 uView;
+uniform float uScale;       // device pixels per world unit at the focus
+uniform float uZScale;
 uniform vec3 uHue[12];
-out vec2 vScreen;
-flat out vec4 vSRect;
+out vec2 vWorld;
+flat out vec4 vRect;
 flat out ivec2 vRF;         // rung, flags
 flat out vec3 vTile;
 flat out int vRing;
@@ -25,28 +28,30 @@ ivec2 tc(int i) { return ivec2(i & 4095, i >> 12); }
 
 void main() {
     int f = gl_InstanceID;
-    vec4 rect = texelFetch(uFileF, tc(2 * f), 0);
-    vec2 v0 = uOffset, v1 = uOffset + uViewport / uScale;
+    vec4 rect = texelFetch(uFileF, tc(3 * f), 0);
     // no early return (see line.glsl): every output is written on every path
-    bool kill = !(rect.z > v0.x && rect.x < v1.x && rect.w > v0.y && rect.y < v1.y);
-    vec4 meta = texelFetch(uFileF, tc(2 * f + 1), 0);
+    bool kill = !(rect.z > uView.x && rect.x < uView.z && rect.w > uView.y && rect.y < uView.w);
+    vec4 meta = texelFetch(uFileF, tc(3 * f + 1), 0);
+    vec4 zz = texelFetch(uFileF, tc(3 * f + 2), 0);
     uvec4 fu = texelFetch(uFileU, tc(f), 0);
-    vec2 s0 = (rect.xy - uOffset) * uScale;
-    vec2 s1 = (rect.zw - uOffset) * uScale;
-    s1 = max(s1, s0 + 1.0);                 // at least one device pixel
-    vec2 s = mix(s0, s1, aQuad);
-    gl_Position = kill ? vec4(-2.0, -2.0, 0.0, 1.0)
-                       : vec4(s.x / uViewport.x * 2.0 - 1.0, 1.0 - s.y / uViewport.y * 2.0, 0.0, 1.0);
-    vScreen = s;
-    vSRect = vec4(s0, s1);
+    // slivers thinner than a device pixel are widened to one
+    float wpp = 1.0 / uScale;
+    vec4 r = rect;
+    if (r.z - r.x < wpp) r.z = r.x + wpp;
+    if (r.w - r.y < wpp) r.w = r.y + wpp;
+    vec2 w = mix(r.xy, r.zw, aQuad);
+    float z = (zz.x + zz.y) * uZScale + (uRingOnly == 1 ? 0.08 : 0.0);
+    gl_Position = kill ? vec4(-2.0, -2.0, 0.0, 1.0) : uMVP * vec4(w, z, 1.0);
+    vWorld = w;
+    vRect = r;
     vRF = ivec2(int(fu.x), int(fu.y));
     vTile = uHue[int(meta.w) % 12];
     vRing = uRingOnly;
 }
 // ---- fragment ----
 #version 330 core
-in vec2 vScreen;
-flat in vec4 vSRect;
+in vec2 vWorld;
+flat in vec4 vRect;
 flat in ivec2 vRF;
 flat in vec3 vTile;
 flat in int vRing;
@@ -66,9 +71,10 @@ void main() {
     // bands only, so the rung 0/1 cut does not flip a file's colour
     vec3 col = FILEBG;
     if (dimmed) col *= 0.5;
-    float d = min(min(vScreen.x - vSRect.x, vSRect.z - vScreen.x),
-                  min(vScreen.y - vSRect.y, vSRect.w - vScreen.y));
-    float bw = current ? 3.0 : (hit ? 2.0 : (hovered ? 2.0 : 1.0));
+    float d = min(min(vWorld.x - vRect.x, vRect.z - vWorld.x),
+                  min(vWorld.y - vRect.y, vRect.w - vWorld.y));
+    float px = max(fwidth(vWorld.x), fwidth(vWorld.y));   // world units per device pixel
+    float bw = (current ? 3.0 : (hit ? 2.0 : (hovered ? 2.0 : 1.0))) * px;
     // the border is drawn again after the lines (uRingOnly), so column-0
     // text never breaks the yellow hit outline; the fill pass skips it
     if (vRing == 1 && d >= bw) discard;

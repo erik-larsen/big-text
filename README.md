@@ -58,6 +58,8 @@ That is 19 files and 15,216 lines, indexed and laid out in well under a second. 
 | Click a symbol at text zoom | Select it in the Inspector: kind, definition, scope, every reference |
 | `I` / `Tab` | Open or close the Inspector / switch between Inspector and Results |
 | Toolbar or `M` | Switch the area metric: Tokens, References, Lines (a hard cut to another layout) |
+| `3D` button or `3` | The tilted projection: files and directories extruded by the current metric |
+| `Alt` + drag | Tilt (vertical) and turn (horizontal) the 3D camera; from 2D it switches to 3D |
 | `R` | Refit the map |
 | `Escape` | Clear the filter, then the selection |
 
@@ -81,6 +83,12 @@ big-picture's own source at the four rungs, from the fitted map through 2, 4.5 a
 The same corpus laid out by references instead of tokens (the toolbar's second metric): the files everything depends on grow, the generated bindings shrink.
 
 ![references layout](docs/shots/makepad-draw/references.png)
+
+The 3D projection over the references layout: the cores of the codebase as the tallest buildings, directories as terraces, the ladder still drawn on every roof so the near rows are text and the far rows are bars. Alt-drag tilts and turns it.
+
+![3D city](docs/shots/makepad-draw/3d.png)
+![3D close](docs/shots/makepad-draw/3d_zoom.png)
+![3D text](docs/shots/makepad-draw/3d_text.png)
 
 A long line wrapped inside its column at text zoom, the continuation rows hanging in by two characters (the credits block of stb_image.h).
 
@@ -112,10 +120,11 @@ The contract that the code was built against is [docs/DESIGN.md](docs/DESIGN.md)
 - **Resolver.** `atlas_resolve.py` parses every file with tree-sitter and collects entities (functions, methods, structs, fields, enums, variants, traits, type aliases, consts, statics, modules, macros, type parameters, parameters, locals) and every identifier use. Each use is resolved lexically, in order: the enclosing function's locals, the file, the file's `use` imports through the crate found by its Cargo.toml, a unique name in the crate, a unique name in the corpus, with type parameters, `Self`, enum paths and `Type::method` handled along the way; what is left is ambiguous, external (a crate not in the corpus), missing import, missing macro or not found, and the counts of each are the Inspector's coverage block. No type inference, so a method after a dot with several candidates is "method dispatch", the same category Rik's analyser reports. Rust is covered fully; Python and C get functions, types, parameters and locals. All of makepad resolves in 25 seconds on ten cores: 864k entities and 4.7 million references, 64 percent of them resolved, across 317 crates; Rik's Inspector reports 722k entities and 1.3 million edges for the same tree, so the scale matches even though the rules do not.
 - **Filter.** A word that names an entity lists its definitions with their kinds and every reference with its status; any other word is a whole-word regex over the corpus in a thread, chunked so the frame loop keeps running, with mentions inside comments and strings excluded. `Window` in makepad-draw finds 2 definitions (the x11 type alias and an enum variant) and 152 references, 91 of them resolved to one or the other; Rik's analyser reports 119 and 1472 for all of makepad.
 - **Fly-to** is van Wijk and Nuij's smooth zoom-and-pan, which zooms out and back in between distant places.
+- **3D.** Every world shader takes one model-view-projection matrix, orthographic in 2D and perspective in 3D, so the flat view is unchanged. In 3D the camera orbits a focus point at tilt and yaw, at a distance chosen so one world unit at the focus is still the same number of pixels as in 2D, which keeps the zoom semantics and the per-file rung: a file's pixels per line is foreshortened by its depth, so one frame has text near and bars far. Directories are terraces of five world units per level, files rise from their terrace by the square root of the current metric, an instanced wall pass draws the four sides of every rectangle shaded by which way they face, and the focus height rides on the roof of the file under the centre so a close camera never ends up inside a building. Picking unprojects the cursor onto that roof; labels are billboards at projected corners.
 
 Measured on an M4 MacBook at a 2940 by 1658 framebuffer, `--frames 300 --stats` over the scripted zoom from fit to text: big-picture 1.2 ms mean and 3.4 ms 99th percentile; makepad-draw 1.6 and 4.4 ms; the full makepad tree 4.5 and 23.7 ms, the tail being the fitted view where all 3.67 million lines are visible, and 1.3 ms once zoomed to text.
 
-Not built: the 3D projection and tilt, lenses other than Folders and Size, history, and a streaming working set (the whole corpus is resident, which is fine to a few million lines).
+Not built: lenses other than Folders and Size, history, selection and the Layers view, and a streaming working set (the whole corpus is resident, which is fine to a few million lines).
 
 ## Decisions so far
 
@@ -150,7 +159,7 @@ big-text/
   atlas_font.py                monospace font -> raster glyph atlas
   atlas_viewer.py              the viewer
   vt_glyphs.py                 the Dobbie vector-texture glyph tier
-  shaders/                     GLSL 330, one file per program
+  shaders/                     GLSL 330, one file per program (dir, file, line, rect, text, wall, vt_glyph)
   tests/                       layout invariants, viewer input, vector glyph accuracy, a synthetic atlas
   data/                        generated atlases and glyph caches (gitignored)
   dobbie/                      the two live demos, verified against wdobbie.com

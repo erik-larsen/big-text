@@ -13,6 +13,7 @@ Regenerate everything with:
 ./atlas_layout.py data/makepad-draw_atlas --preview docs/shots/makepad-draw_layout.png
 ./atlas_viewer.py data/big-picture_atlas --shots docs/shots/big-picture --filter Viewer --stats
 ./atlas_viewer.py data/makepad-draw_atlas --shots docs/shots/makepad-draw --filter Window --stats
+./atlas_viewer.py data/makepad-draw_atlas --proj 3d --tilt 55 --yaw 12 --hover platform/src/os/linux/x11/x11_sys.rs:8:12 --frames 2 --screenshot docs/shots/makepad-draw/3d_text.png
 ./atlas_viewer.py data/makepad-draw_atlas --inspector --frames 1 --screenshot docs/shots/makepad-draw/coverage.png
 ./atlas_viewer.py data/makepad-draw_atlas --inspect Window --frames 2 --screenshot docs/shots/makepad-draw/inspector.png
 ./atlas_viewer.py data/makepad-draw_atlas --hover platform/src/os/linux/x11/x11_sys.rs:8:12 --frames 2 --screenshot docs/shots/makepad-draw/hover_symbol.png
@@ -50,6 +51,9 @@ Regenerate everything with:
 - `makepad-draw/hover.png`: the same view hovered at the centre: label `platform/src/draw_shader.rs:232 enum DrawShaderInputPacking`.
 - `makepad-draw/filter.png`: the fitted map with the filter `Window`: 31 hit files outlined in yellow at the overview, the rest dimmed, the panel populated with 1 definition (`pub type Window = XID`) and 147 references grouped by file, the status line `1 definitions · 147 references · 31 files · 0/148`.
 - `makepad-draw/references.png`: the map laid out by the references metric (`--shots` takes it after the results; the toolbar or M switches live): the x11 bindings and the script VM grow, the generated code shrinks.
+- `makepad-draw/3d.png`: the references layout in the 3D projection at tilt 55 and yaw 12, fitted: the fan-in skyline, directories as terraces, tags on the terrace edges.
+- `makepad-draw/3d_zoom.png`: the same at 3 px per line about the centre: text on the near roofs, bars on the far ones, walls occluding.
+- `makepad-draw/3d_text.png`: `--proj 3d --hover platform/src/os/linux/x11/x11_sys.rs:8:12`: text zoom on a roof in perspective with the hover label.
 - `makepad-draw/coverage.png`: the Inspector with nothing selected (`--inspector`): the resolver's coverage block, one line per resolution status with its count.
 - `makepad-draw/inspector.png`: the Inspector on the enum variant `Window` (`--inspect Window`): kind and name, path and line, the enclosing enum, the definition and reference counts, and the references grouped by file, each a click away.
 - `makepad-draw/hover_symbol.png`: the cursor held on `Window` in x11_sys.rs at text zoom: the label reads the resolver's view, `type Window · 2 definitions · 102 references`.

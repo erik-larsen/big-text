@@ -1,8 +1,9 @@
 // line.glsl: instanced line quads. The vertex shader fetches the line
 // (tex_line_f: x, y, file-relative index; tex_line_u: byte offset lo, file,
 // indent | len << 16, byte offset hi), the file's rung, flags and sampling
-// step (tex_file_u) and its pitch and cap (tex_file_f), and emits a
-// degenerate quad for lines outside the view. The fragment shader draws the
+// step (tex_file_u), its pitch and cap and its height (tex_file_f, three
+// texels per file), and emits a degenerate quad for lines outside the
+// view. Positions go through uMVP, at the file's top in 3D. The fragment shader draws the
 // four rungs: 0 every step-th line as a one pixel grey bar (the sampled
 // overview texture), 1 a grey bar from indent to len, 2 one block per
 // character in the kind colour (token segments), 3 the glyph from the
@@ -13,9 +14,11 @@ uniform sampler2D uLineF;
 uniform usampler2D uLineU;
 uniform sampler2D uFileF;
 uniform usampler2D uFileU;
-uniform vec2 uOffset;
-uniform float uScale;
-uniform vec2 uViewport;
+uniform mat4 uMVP;
+uniform vec4 uView;         // world rectangle in view (conservative), for culling
+uniform float uScale;       // device pixels per world unit at the focus
+uniform float uFocusW;      // clip w at the focus point (1 in 2D)
+uniform float uZScale;
 uniform float uCharAspect;
 uniform int uBase;          // first line of this draw (visible files come in runs)
 out vec2 vUV;
@@ -41,20 +44,20 @@ void main() {
     int step = int(fu.z) | (int(fu.w) << 8);
     int j = int(lf.z);
     bool kill = len == 0 || (rung == 0 && (step < 1 || j % step != 0));
-    vec4 meta = texelFetch(uFileF, tc(2 * f + 1), 0);
+    vec4 meta = texelFetch(uFileF, tc(3 * f + 1), 0);
+    vec4 zz = texelFetch(uFileF, tc(3 * f + 2), 0);
     float p = meta.x;
     float lenc = min(float(len), meta.z);
     vec2 p0 = lf.xy;
     vec2 p1 = p0 + vec2(lenc * p * uCharAspect, rung == 0 ? 1.0 / uScale : p);
-    vec2 v0 = uOffset, v1 = uOffset + uViewport / uScale;
-    kill = kill || p1.x < v0.x || p0.x > v1.x || p1.y < v0.y || p0.y > v1.y;
-    vec2 s = (mix(p0, p1, aQuad) - uOffset) * uScale;
-    gl_Position = kill ? vec4(-2.0, -2.0, 0.0, 1.0)
-                       : vec4(s.x / uViewport.x * 2.0 - 1.0, 1.0 - s.y / uViewport.y * 2.0, 0.0, 1.0);
+    kill = kill || p1.x < uView.x || p0.x > uView.z || p1.y < uView.y || p0.y > uView.w;
+    float z = (zz.x + zz.y) * uZScale + 0.04;
+    gl_Position = kill ? vec4(-2.0, -2.0, 0.0, 1.0) : uMVP * vec4(mix(p0, p1, aQuad), z, 1.0);
     vUV = aQuad;
     vOff = uvec2(lu.x, lu.w);
     vMeta = ivec4(int(lu.z & 0xFFFFu), int(lenc), rung, int(fu.y));
-    vPpl = p * uScale;
+    // device pixels per line where this row is: the focus scale, foreshortened
+    vPpl = p * uScale * uFocusW / max(gl_Position.w, 1e-6);
 }
 // ---- fragment ----
 #version 330 core

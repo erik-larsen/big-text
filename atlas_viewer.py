@@ -44,6 +44,10 @@ ZOOM_VMAX = 12.0         # log-zoom per second at most
 PANEL_PT = 180           # results panel width in window points
 MARGIN_PT = 10           # UI margin in window points
 FLY_RHO = 1.4
+FOVY = 45.0              # 3D camera field of view, degrees
+H_MAX = 90.0             # tallest file in world units (the world is 1600 wide)
+DIR_STEP = 5.0           # terrace height per directory level
+TILT_MAX = 70.0
 FLY_V = 10.0             # van Wijk path units per second
 VT_MIN_PPL = 40.0        # --vector-text draws glyphs with the vector tier from here
 
@@ -371,10 +375,25 @@ class Viewer:
         self.res = load_resolve(args.atlas, a)
         self.metrics = [m for m in METRIC_ORDER if m in a["layouts"]]
         self.hang = int(a["layout"].get("hang", 2))
+        # projection: 2d is orthographic; 3d is a perspective camera that
+        # orbits the focus point (cx, cy) at tilt and yaw, with files and
+        # directories extruded by the metric
+        self.proj = getattr(args, "proj", None) or "2d"
+        self.tilt = float(getattr(args, "tilt", None) if getattr(args, "tilt", None) is not None
+                          else (55.0 if self.proj == "3d" else 0.0))
+        self.yaw = float(getattr(args, "yaw", None) or 0.0)
+        self.tilting = False
+        self.M = np.eye(4)
+        self.M_inv = np.eye(4)
+        self.focus_w = 1.0
+        self.z_focus = 0.0            # height the 3D camera orbits: the file top under the centre
         self.n_files = len(a["file_rect"])
         self.n_lines = len(a["line_file"])
         self.n_rows = len(a["row_pos"])
         self.n_dirs = len(a["dir_rect"])
+        self.file_scale = np.ones(self.n_files)
+        self.dir_scale = np.ones(self.n_dirs)
+        self.compute_heights()
         self.n_chars = len(a["chars"])
         self.W, self.H = (float(v) for v in a["world"])
         self.A = float(a["layout"].get("char_aspect", 0.6))
@@ -477,7 +496,7 @@ class Viewer:
         if self.vt is not None:
             vt_src = "#define VT_TEXT 1\n" + (HERE / "shaders" / "vt_glyph.glsl").read_text()
         self.prog = {n: load_program(n, vt_src if n == "line" else "")
-                     for n in ("dir", "file", "line", "rect", "text")}
+                     for n in ("dir", "file", "line", "rect", "text", "wall")}
         self.loc = {n: {} for n in self.prog}
         quad = np.array([[0, 0], [1, 0], [1, 1], [0, 0], [1, 1], [0, 1]], np.float32)
         self.quad_vbo = glGenBuffers(1)
@@ -488,7 +507,7 @@ class Viewer:
         glBindBuffer(GL_ARRAY_BUFFER, self.quad_vbo)
         glEnableVertexAttribArray(0)
         glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 8, ctypes.c_void_p(0))
-        self.rect_vao, self.rect_vbo = instanced_vao(self.quad_vbo, [(1, 4), (2, 4), (3, 2)])
+        self.rect_vao, self.rect_vbo = instanced_vao(self.quad_vbo, [(1, 4), (2, 4), (3, 2), (4, 1)])
         self.text_vao, self.text_vbo = instanced_vao(self.quad_vbo, [(1, 2), (2, 2), (3, 1), (4, 4)])
         glBindVertexArray(0)
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
@@ -545,6 +564,27 @@ class Viewer:
             glActiveTexture(GL_TEXTURE0 + i)
             glBindTexture(GL_TEXTURE_2D, tex)
 
+    def compute_heights(self):
+        """z base and height per file and directory from the current layout's
+        metric: directories are terraces of DIR_STEP per level, files sit on
+        their directory's terrace with a height of H_MAX * sqrt(metric /
+        max)."""
+        a = self.a
+        depth = a["dir_depth"].astype(np.float64)
+        self.dir_z0 = np.maximum(depth - 1, 0) * DIR_STEP
+        self.dir_h = np.where(depth >= 1, DIR_STEP, 0.0)
+        top = self.dir_z0 + self.dir_h
+        m = a.get("file_metric")
+        if m is None:
+            m = np.ones(self.n_files)
+        m = np.asarray(m, np.float64)
+        self.file_h = H_MAX * np.sqrt(np.maximum(m, 0) / max(float(m.max()), 1e-9))
+        self.file_z0 = top[a["file_dir"]]
+        self.file_top = self.file_z0 + self.file_h
+
+    def z_scale(self):
+        return 1.0 if self.proj == "3d" else 0.0
+
     def upload_layout(self):
         """(Re)upload the layout textures: one texel per visual row (position,
         row index in file; byte offset, file, indent | len), two per file and
@@ -574,20 +614,24 @@ class Viewer:
         buf = padded_rows(lu, TEX_W)
         self.tex_line_u = texture_2d(GL_RGBA32UI, GL_RGBA_INTEGER, GL_UNSIGNED_INT, buf)
         gpu += buf.nbytes
-        ff = np.zeros((2 * self.n_files, 4), np.float32)
-        ff[0::2] = a["file_rect"]
-        ff[1::2, 0] = a["file_pitch"]
-        ff[1::2, 1] = a["file_colw"]
-        ff[1::2, 2] = a["file_cap"]
-        ff[1::2, 3] = a["file_hue"]
+        ff = np.zeros((3 * self.n_files, 4), np.float32)
+        ff[0::3] = a["file_rect"]
+        ff[1::3, 0] = a["file_pitch"]
+        ff[1::3, 1] = a["file_colw"]
+        ff[1::3, 2] = a["file_cap"]
+        ff[1::3, 3] = a["file_hue"]
+        ff[2::3, 0] = self.file_z0
+        ff[2::3, 1] = self.file_h
         buf = padded_rows(ff, TEX_W)
         self.tex_file_f = texture_2d(GL_RGBA32F, GL_RGBA, GL_FLOAT, buf)
         gpu += buf.nbytes
-        df = np.zeros((2 * self.n_dirs, 4), np.float32)
-        df[0::2] = a["dir_rect"]
-        df[1::2, 0] = a["dir_pad"]
-        df[1::2, 1] = a["dir_depth"]
-        df[1::2, 2] = a["dir_hue"]
+        df = np.zeros((3 * self.n_dirs, 4), np.float32)
+        df[0::3] = a["dir_rect"]
+        df[1::3, 0] = a["dir_pad"]
+        df[1::3, 1] = a["dir_depth"]
+        df[1::3, 2] = a["dir_hue"]
+        df[2::3, 0] = self.dir_z0
+        df[2::3, 1] = self.dir_h
         buf = padded_rows(df, TEX_W)
         self.tex_dir_f = texture_2d(GL_RGBA32F, GL_RGBA, GL_FLOAT, buf)
         gpu += buf.nbytes
@@ -617,8 +661,17 @@ class Viewer:
         per_file = np.diff(a["file_line0"])[order]
         mid = min(int(np.searchsorted(np.cumsum(per_file), per_file.sum() / 2)), len(order) - 1)
         self.median_pitch = float(a["file_pitch"][order[mid]])
+        self.compute_heights()
         self.upload_layout()
         self.bind_textures()
+        self.hover = None
+
+    def set_proj(self, proj):
+        if proj == self.proj:
+            return
+        self.proj = proj
+        if proj == "3d" and self.tilt == 0.0:
+            self.tilt = 55.0
         self.hover = None
 
     def row_of(self, line, col):
@@ -640,20 +693,89 @@ class Viewer:
             d[name] = glGetUniformLocation(self.prog[prog], name)
         return d[name]
 
+    def camera_matrix(self):
+        """World (x, y, z) to clip. 2D: orthographic, exactly the old
+        (world - offset) * scale mapping. 3D: a perspective camera at
+        distance D from the focus (cx, cy, 0), tilted from top-down by
+        self.tilt and turned by self.yaw, with D chosen so that one world
+        unit at the focus is still self.zoom device pixels."""
+        if self.proj != "3d":
+            x0, y0, _, _ = self.view2d()
+            sx, sy = 2.0 * self.zoom / self.map_w, 2.0 * self.zoom / self.fb_h
+            M = np.array([[sx, 0, 0, -1 - x0 * sx],
+                          [0, -sy, 0, 1 + y0 * sy],
+                          [0, 0, 0, 0],
+                          [0, 0, 0, 1]], np.float64)
+            self.focus_w = 1.0
+        else:
+            th, ph = math.radians(self.tilt), math.radians(self.yaw)
+            tan_h = math.tan(math.radians(FOVY) / 2)
+            D = self.fb_h / (2.0 * self.zoom * tan_h)
+            F = np.array([self.cx, self.cy, self.z_focus])
+            eye = F + D * np.array([math.sin(th) * math.sin(ph), math.sin(th) * math.cos(ph), math.cos(th)])
+            fwd = F - eye
+            fwd /= np.linalg.norm(fwd)
+            right = np.array([math.cos(ph), -math.sin(ph), 0.0])
+            up = np.cross(fwd, right)
+            V = np.eye(4)
+            V[0, :3], V[1, :3], V[2, :3] = right, up, -fwd
+            V[:3, 3] = -V[:3, :3] @ eye
+            near, far = max(D * 0.02, 0.05), D * 12 + 4000.0
+            aspect = self.map_w / self.fb_h
+            P = np.zeros((4, 4))
+            P[0, 0] = 1.0 / (tan_h * aspect)
+            P[1, 1] = 1.0 / tan_h
+            P[2, 2] = -(far + near) / (far - near)
+            P[2, 3] = -2.0 * far * near / (far - near)
+            P[3, 2] = -1.0
+            M = P @ V
+            self.focus_w = D
+            self.eye = eye
+        self.M = M
+        try:
+            self.M_inv = np.linalg.inv(M) if self.proj == "3d" else None
+        except np.linalg.LinAlgError:
+            self.M_inv = None
+        return M
+
     def set_camera_uniforms(self, prog, world=True):
         """world: the map's viewport (the window minus the panel column);
         else the whole window in device pixels for the UI"""
         p = self.prog[prog]
         glUseProgram(p)
+        loc = self.uniform(prog, "uMVP")
         if world:
-            x0, y0, _, _ = self.view()
-            glUniform2f(self.uniform(prog, "uOffset"), x0, y0)
+            glUniformMatrix4fv(loc, 1, GL_TRUE, self.M.astype(np.float32))
+            glUniform4f(self.uniform(prog, "uView"), *self.view())
             glUniform1f(self.uniform(prog, "uScale"), self.zoom)
+            glUniform1f(self.uniform(prog, "uFocusW"), self.focus_w)
+            glUniform1f(self.uniform(prog, "uZScale"), self.z_scale())
+            glUniform1i(self.uniform(prog, "uWorld"), 1)
             glUniform2f(self.uniform(prog, "uViewport"), self.map_w, self.fb_h)
         else:
-            glUniform2f(self.uniform(prog, "uOffset"), 0.0, 0.0)
-            glUniform1f(self.uniform(prog, "uScale"), 1.0)
+            glUniformMatrix4fv(loc, 1, GL_TRUE, np.eye(4, dtype=np.float32))
+            glUniform1i(self.uniform(prog, "uWorld"), 0)
             glUniform2f(self.uniform(prog, "uViewport"), self.fb_w, self.fb_h)
+
+    def unproject(self, sx, sy, wz=0.0):
+        """World point on the plane z = wz under device pixel (sx, sy) in
+        the 3D camera, or None if the ray does not hit it in front."""
+        nx, ny = sx / self.map_w * 2.0 - 1.0, 1.0 - sy / self.fb_h * 2.0
+        p0 = self.M_inv @ np.array([nx, ny, -1.0, 1.0])
+        p1 = self.M_inv @ np.array([nx, ny, 1.0, 1.0])
+        p0, p1 = p0[:3] / p0[3], p1[:3] / p1[3]
+        d = p1 - p0
+        if abs(d[2]) < 1e-12:
+            return None
+        t = (wz - p0[2]) / d[2]
+        if t < 0:
+            return None
+        return p0 + t * d
+
+    def project(self, wx, wy, wz=0.0):
+        c = self.M @ np.array([wx, wy, wz, 1.0])
+        w = c[3] if abs(c[3]) > 1e-9 else 1e-9
+        return ((c[0] / w + 1.0) * 0.5 * self.map_w, (1.0 - c[1] / w) * 0.5 * self.fb_h)
 
     # ---- camera ---------------------------------------------------------
     @property
@@ -663,9 +785,27 @@ class Viewer:
         column = (PANEL_PT + 2 * MARGIN_PT) * self.px if self.panel_rows else 0.0
         return self.fb_w - column
 
-    def view(self):
+    def view2d(self):
         w, h = self.map_w / self.zoom, self.fb_h / self.zoom
         return (self.cx - w / 2, self.cy - h / 2, self.cx + w / 2, self.cy + h / 2)
+
+    def view(self):
+        """The world rectangle in view: exact in 2D; in 3D the bounding box
+        of the viewport corners unprojected onto the plane (rays that miss
+        the plane count as far away), clamped to a few worlds around."""
+        if self.proj != "3d" or self.M_inv is None:
+            return self.view2d()
+        pts = []
+        far = 3.0 * max(self.W, self.H)
+        for wz in (0.0, self.z_focus, self.z_focus + H_MAX):
+            for sx, sy in ((0, 0), (self.map_w, 0), (0, self.fb_h), (self.map_w, self.fb_h)):
+                p = self.unproject(sx, sy, wz)
+                if p is None:
+                    pts.append((self.cx - far, self.cy - far)); pts.append((self.cx + far, self.cy + far))
+                else:
+                    pts.append((p[0], p[1]))
+        xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+        return (max(min(xs), -far), max(min(ys), -far), min(max(xs), self.W + far), min(max(ys), self.H + far))
 
     def fit_zoom(self):
         return min(self.map_w * 0.94 / self.W, self.fb_h * 0.94 / self.H)
@@ -694,12 +834,32 @@ class Viewer:
         self.zoom_vel = 0.0
         self.cx, self.cy = self.W / 2, self.H / 2
         self.zoom = self.fit_zoom()
+        if self.proj == "3d":             # perspective: back off until the map fits
+            self.z_focus = 0.0
+            corners = np.array([[0, 0], [self.W, 0], [0, self.H], [self.W, self.H]], np.float64)
+            for _ in range(12):
+                self.camera_matrix()
+                c = np.concatenate((corners, np.zeros((4, 1)), np.ones((4, 1))), axis=1) @ self.M.T
+                top = c.copy(); top[:, 2] += H_MAX
+                w = np.maximum(c[:, 3], 1e-6)
+                over = float(max(np.abs(c[:, 0] / w).max(), np.abs(c[:, 1] / w).max()))
+                if over <= 0.97:
+                    break
+                self.zoom /= over * 1.04
 
-    def screen_to_world(self, sx, sy):
+    def screen_to_world(self, sx, sy, wz=None):
+        if self.proj == "3d" and self.M_inv is not None:
+            p = self.unproject(sx, sy, self.z_focus if wz is None else wz)
+            if p is None:                 # above the horizon: far along the view
+                return (self.cx + (sx - self.map_w / 2) * 50.0 / self.zoom,
+                        self.cy - 50.0 * self.fb_h / self.zoom)
+            return (float(p[0]), float(p[1]))
         return (self.cx + (sx - self.map_w / 2) / self.zoom,
                 self.cy + (sy - self.fb_h / 2) / self.zoom)
 
-    def world_to_screen(self, wx, wy):
+    def world_to_screen(self, wx, wy, wz=0.0):
+        if self.proj == "3d":
+            return self.project(wx, wy, wz)
         return ((wx - self.cx) * self.zoom + self.map_w / 2,
                 (wy - self.cy) * self.zoom + self.fb_h / 2)
 
@@ -716,6 +876,12 @@ class Viewer:
         if z != self.zoom * factor:
             self.zoom_vel = 0.0
         self.zoom = z
+        if self.proj == "3d":             # keep the plane point under the cursor
+            self.camera_matrix()
+            nx, ny = self.screen_to_world(sx, sy)
+            self.cx += wx - nx
+            self.cy += wy - ny
+            return
         self.cx = wx - (sx - self.map_w / 2) / z
         self.cy = wy - (sy - self.fb_h / 2) / z
 
@@ -806,6 +972,7 @@ class Viewer:
             self.fly = None
             self.zoom_vel = 0.0
             self.drag = (x, y)
+            self.tilting = bool(mods & glfw.MOD_ALT)
             self.press = (x, y)
         else:
             if (self.press is not None and abs(x - self.press[0]) < 3
@@ -819,6 +986,8 @@ class Viewer:
             if in_rect(sx, sy, rect):
                 if act[0] == "metric":
                     self.set_metric(act[1])
+                elif act[0] == "proj":
+                    self.set_proj(act[1])
                 return
         if self.filter_rect and in_rect(sx, sy, self.filter_rect):
             self.filter_focus = True
@@ -850,6 +1019,22 @@ class Viewer:
         self.cursor = (x * self.px, y * self.px)
         if self.drag:
             dx, dy = (x - self.drag[0]) * self.px, (y - self.drag[1]) * self.px
+            if self.tilting:              # Alt-drag: tilt and turn the 3D camera
+                if self.proj != "3d":
+                    self.set_proj("3d")
+                    self.tilt = 0.0
+                self.tilt = min(max(self.tilt + dy * 0.25 / self.px, 0.0), TILT_MAX)
+                self.yaw = (self.yaw + dx * 0.25 / self.px) % 360.0
+                self.drag = (x, y)
+                return
+            if self.proj == "3d":         # pan along the plane under the cursor
+                self.camera_matrix()
+                bx, by = self.screen_to_world(self.drag[0] * self.px, self.drag[1] * self.px)
+                ax, ay = self.screen_to_world(x * self.px, y * self.px)
+                self.cx -= ax - bx
+                self.cy -= ay - by
+                self.drag = (x, y)
+                return
             self.drag = (x, y)
             self.cx -= dx / self.zoom
             self.cy -= dy / self.zoom
@@ -897,6 +1082,8 @@ class Viewer:
             self.step(-1)
         elif key == glfw.KEY_R:
             self.fit()
+        elif key == glfw.KEY_3:
+            self.set_proj("2d" if self.proj == "3d" else "3d")
         elif key == glfw.KEY_M and len(self.metrics) > 1:
             i = self.metrics.index(self.a["metric"])
             self.set_metric(self.metrics[(i + 1) % len(self.metrics)])
@@ -1146,6 +1333,11 @@ class Viewer:
         x, y = (float(v) for v in self.a["row_pos"][int(row)])
         xc, yc = x + int(rc) * p * self.A, y + p / 2
         hw, hh = cols / 2 * p * self.A, lines / 2 * p
+        # keep the centre on the file, so the file under the view centre is
+        # this one (the zoom reference and the 3D focus height depend on it)
+        x0, y0, x1, y1 = (float(v) for v in self.a["file_rect"][f])
+        xc = min(max(xc, x0 + 1e-3), max(x1 - 1e-3, x0 + 1e-3))
+        yc = min(max(yc, y0 + 1e-3), max(y1 - 1e-3, y0 + 1e-3))
         return (xc - hw, yc - hh, xc + hw, yc + hh)
 
     def goto(self, spec, complete=True):
@@ -1162,7 +1354,9 @@ class Viewer:
         if line:
             j = min(max(int(line) - 1, 0), max(l1 - l0 - 1, 0))
             if l1 > l0:
-                self.fly_to(self.line_rect(f, l0 + j), complete=complete)
+                # centre a little way into the line, not on its first column
+                col = min(30, int(self.a["line_len"][l0 + j]) // 2)
+                self.fly_to(self.line_rect(f, l0 + j, col), complete=complete)
                 return
         self.fly_to(tuple(float(v) for v in self.a["file_rect"][f]), complete=complete)
 
@@ -1196,6 +1390,14 @@ class Viewer:
     def hover_at(self, sx, sy):
         wx, wy = self.screen_to_world(sx, sy)
         f = self.file_at(wx, wy)
+        if self.proj == "3d":             # re-pick on that file's top, then its neighbour's
+            for _ in range(2):
+                z = float(self.file_top[f]) if f is not None else 0.0
+                wx, wy = self.screen_to_world(sx, sy, z)
+                f2 = self.file_at(wx, wy)
+                if f2 == f:
+                    break
+                f = f2
         if f is None:
             return None
         a = self.a
@@ -1315,13 +1517,59 @@ class Viewer:
         self.crumb = "← " + " › ".join([self.name] + parts[::-1])
 
     # ---- frame ----------------------------------------------------------
+    def project_rects(self, rects, z):
+        """(visible, scale) per rectangle at height z through the 3D camera:
+        visible when its projected corners overlap the viewport (a corner
+        behind the camera counts as visible), scale = focus_w / w at the
+        centre, the foreshortening of its pixel size."""
+        n = len(rects)
+        c = np.empty((n, 4, 4))
+        c[:, 0, :2] = rects[:, [0, 1]]; c[:, 1, :2] = rects[:, [2, 1]]
+        c[:, 2, :2] = rects[:, [0, 3]]; c[:, 3, :2] = rects[:, [2, 3]]
+        c[:, :, 2] = z[:, None]
+        c[:, :, 3] = 1.0
+        clip = c @ self.M.T
+        w = clip[:, :, 3]
+        front = w > 1e-6
+        ws = np.where(front, w, 1e-6)
+        nx, ny = clip[:, :, 0] / ws, clip[:, :, 1] / ws
+        inside = ((np.where(front, nx, -np.inf).max(axis=1) > -1) & (np.where(front, nx, np.inf).min(axis=1) < 1)
+                  & (np.where(front, ny, -np.inf).max(axis=1) > -1) & (np.where(front, ny, np.inf).min(axis=1) < 1))
+        visible = np.where(front.all(axis=1), inside, front.any(axis=1))
+        wc = np.maximum(w.mean(axis=1), 1e-6)
+        return visible, self.focus_w / wc
+
+    def focus_target(self):
+        """The height the 3D camera should orbit: the top of the file under
+        the view centre once that file is at least two pixels per line, the
+        ground when zoomed out, blended between."""
+        f = self.file_at(self.cx, self.cy)
+        if f is None:                     # over a directory band: hold the height
+            return self.z_focus
+        w = min(max(float(self.a["file_pitch"][f]) * self.zoom / 2.0, 0.0), 1.0)
+        return float(self.file_top[f]) * w
+
+    def settle_focus(self):
+        self.z_focus = self.focus_target() if self.proj == "3d" else 0.0
+
     def update_per_file(self):
         a = self.a
+        if self.proj == "3d":
+            self.z_focus += (self.focus_target() - self.z_focus) * (1.0 if self.scripted else 0.2)
+        else:
+            self.z_focus = 0.0
+        self.camera_matrix()
         x0, y0, x1, y1 = self.view()
-        ppl = a["file_pitch"] * self.zoom
-        self.rung = ((ppl >= 1).astype(np.uint8) + (ppl >= 3) + (ppl >= 6)).astype(np.uint8)
         r = a["file_rect"]
-        self.visible = (r[:, 2] > x0) & (r[:, 0] < x1) & (r[:, 3] > y0) & (r[:, 1] < y1)
+        if self.proj == "3d":
+            self.visible, self.file_scale = self.project_rects(r, self.file_top)
+            _, self.dir_scale = self.project_rects(a["dir_rect"], self.dir_z0 + self.dir_h)
+        else:
+            self.visible = (r[:, 2] > x0) & (r[:, 0] < x1) & (r[:, 3] > y0) & (r[:, 1] < y1)
+            self.file_scale = np.ones(self.n_files)
+            self.dir_scale = np.ones(self.n_dirs)
+        ppl = a["file_pitch"] * self.zoom * self.file_scale
+        self.rung = ((ppl >= 1).astype(np.uint8) + (ppl >= 3) + (ppl >= 6)).astype(np.uint8)
         flags = np.zeros(self.n_files, np.uint8)
         cur = self.cursor_override if self.scripted else self.cursor
         over_ui = cur is not None and any(rc and in_rect(cur[0], cur[1], rc)
@@ -1381,6 +1629,8 @@ class Viewer:
         """inst: float32 (n, 10): x0 y0 x1 y1 r g b a border_px fill_alpha."""
         if len(inst) == 0:
             return
+        if inst.shape[1] == 10:           # UI boxes: no height
+            inst = np.concatenate((inst, np.zeros((len(inst), 1), np.float32)), axis=1)
         inst = np.ascontiguousarray(inst, np.float32)
         self.set_camera_uniforms("rect", world)
         glBindVertexArray(self.rect_vao)
@@ -1426,7 +1676,7 @@ class Viewer:
             return np.zeros((0, 10), np.float32)
         rects = a["item_rect"][m]
         kinds = a["item_kind"][a["item_rect_item"][m]]
-        inst = np.zeros((len(rects), 10), np.float32)
+        inst = np.zeros((len(rects), 11), np.float32)
         inst[:, :4] = rects
         for k, c in ITEM_COLORS.items():
             inst[kinds == k, 4:7] = c
@@ -1434,6 +1684,7 @@ class Viewer:
         inst[:, 7] = 1.0
         inst[:, 8] = 0.0
         inst[:, 9] = 0.18
+        inst[:, 10] = self.file_top[self.item_rect_file[m]] + 0.02
         return inst
 
     def item_instances(self):
@@ -1443,13 +1694,14 @@ class Viewer:
             return np.zeros((0, 10), np.float32)
         rects = a["item_rect"][m]
         kinds = a["item_kind"][a["item_rect_item"][m]]
-        inst = np.zeros((len(rects), 10), np.float32)
+        inst = np.zeros((len(rects), 11), np.float32)
         inst[:, :4] = rects
         for k, c in ITEM_COLORS.items():
             inst[kinds == k, 4:7] = c
         inst[(kinds < 1) | (kinds > 5), 4:7] = ITEM_COLORS[5]
         inst[:, 7] = 0.6
         inst[:, 8] = 1.5
+        inst[:, 10] = self.file_top[self.item_rect_file[m]] + 0.06
         return inst
 
     def hit_instances(self):
@@ -1469,7 +1721,7 @@ class Viewer:
         rlen = a["row_len"][row].astype(np.float64)
         c0 = np.minimum(rc, rlen) * p * self.A
         c1 = np.minimum(rc + r["len"], rlen) * p * self.A
-        inst = np.zeros((len(idx), 10), np.float32)
+        inst = np.zeros((len(idx), 11), np.float32)
         inst[:, 0] = pos[:, 0] + c0
         inst[:, 1] = pos[:, 1]
         inst[:, 2] = pos[:, 0] + c1
@@ -1477,6 +1729,7 @@ class Viewer:
         inst[:, 4:7] = YELLOW
         inst[:, 7] = 1.0
         inst[:, 8] = 2.0
+        inst[:, 10] = self.file_top[ff] + 0.06
         if self.result_i >= 0:
             cur = np.flatnonzero(idx == r["order"][self.result_i])
             inst[cur, 9] = 0.25
@@ -1520,10 +1773,12 @@ class Viewer:
 
         # directory labels: tags at the padded top-left of visible directories
         r = a["dir_rect"]
-        side = np.minimum(r[:, 2] - r[:, 0], r[:, 3] - r[:, 1]) * self.zoom
+        side = np.minimum(r[:, 2] - r[:, 0], r[:, 3] - r[:, 1]) * self.zoom * self.dir_scale
         x0, y0, x1, y1 = self.view()
         vis = ((r[:, 2] > x0) & (r[:, 0] < x1) & (r[:, 3] > y0) & (r[:, 1] < y1)
                & (a["dir_depth"] >= 1) & (side >= 48))
+        zs = self.z_scale()
+        dtop = (self.dir_z0 + self.dir_h) * zs
         placed = []
         bh = size + 2 * pad * 0.6
         for d in sorted(np.flatnonzero(vis), key=lambda d: a["dir_depth"][d]):
@@ -1533,12 +1788,14 @@ class Viewer:
             bw = len(text) * cw + 2 * pad
             if bw > 0.4 * (r[d, 2] - r[d, 0]) * self.zoom:
                 continue
-            sx, sy = self.world_to_screen(r[d, 0] + a["dir_pad"][d], r[d, 1] + a["dir_pad"][d])
+            sx, sy = self.world_to_screen(r[d, 0] + a["dir_pad"][d], r[d, 1] + a["dir_pad"][d], dtop[d])
+            if not (-bw <= sx <= self.map_w and -bh <= sy <= self.fb_h):
+                continue
             # a child's corner is inset by its padding only, so its tag would
             # sit on the parent's: slide it right along the top edge, past
             # the tag in the way (the tags then read as a trail, each on its
             # own directory's edge); down only if the right edge runs out
-            right = self.world_to_screen(r[d, 2] - a["dir_pad"][d], 0)[0]
+            right = self.world_to_screen(r[d, 2] - a["dir_pad"][d], r[d, 1] + a["dir_pad"][d], dtop[d])[0]
             ox = sx
             for _ in range(8):
                 hit = next((b for b in placed
@@ -1562,7 +1819,7 @@ class Viewer:
         tx, ty = m, m
         th = size + 2 * pad * 0.6
         groups = [[("Folders", ("lens", "folders"), True)],
-                  [("2D", ("proj", "2d"), True), ("3D", ("proj", "3d"), False)],
+                  [("2D", ("proj", "2d"), self.proj != "3d"), ("3D", ("proj", "3d"), self.proj == "3d")],
                   [(mt.capitalize(), ("metric", mt), mt == self.a["metric"]) for mt in self.metrics]]
         for gi, group in enumerate(groups):
             if gi:
@@ -1570,11 +1827,8 @@ class Viewer:
             for text, act, active in group:
                 bw = len(text) * cw + 2 * pad
                 box(tx, ty, tx + bw, ty + th, UI_BOX, 0.85)
-                enabled = act != ("proj", "3d")
-                label(tx + pad, ty + pad * 0.6, text,
-                      color=YELLOW if active else (UI_TEXT if enabled else UI_DIM))
-                if enabled:
-                    self.toolbar.append(((tx, ty, tx + bw, ty + th), act))
+                label(tx + pad, ty + pad * 0.6, text, color=YELLOW if active else UI_TEXT)
+                self.toolbar.append(((tx, ty, tx + bw, ty + th), act))
                 tx += bw + 2 * s
 
         # crumb trail, bottom left
@@ -1659,13 +1913,20 @@ class Viewer:
         self.update_sizes()
         glViewport(0, 0, self.fb_w, self.fb_h)
         glClearColor(BG[0], BG[1], BG[2], 1.0)
-        glClear(GL_COLOR_BUFFER_BIT)
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         self.update_per_file()
         # the map in its own viewport, the window minus the panel column
         glViewport(0, 0, int(self.map_w), self.fb_h)
-        for prog in ("dir", "file", "line"):
+        for prog in ("dir", "file", "line", "wall"):
             self.set_camera_uniforms(prog)
+        if self.proj == "3d":
+            glEnable(GL_DEPTH_TEST)
+            glDepthFunc(GL_LEQUAL)
         self.draw_instanced("dir", self.n_dirs)
+        if self.proj == "3d":
+            glUseProgram(self.prog["wall"])
+            glUniform1i(self.uniform("wall", "uNFiles"), self.n_files)
+            self.draw_instanced("wall", 4 * (self.n_files + self.n_dirs))
         glUseProgram(self.prog["file"])
         glUniform1i(self.uniform("file", "uRingOnly"), 0)
         self.draw_instanced("file", self.n_files)
@@ -1676,6 +1937,7 @@ class Viewer:
         glUseProgram(self.prog["file"])          # borders over the text
         glUniform1i(self.uniform("file", "uRingOnly"), 1)
         self.draw_instanced("file", self.n_files)
+        glDisable(GL_DEPTH_TEST)
         glViewport(0, 0, self.fb_w, self.fb_h)
         self.draw_ui()
 
@@ -1715,6 +1977,7 @@ class Viewer:
         held = False
         if args.goto:
             self.goto(args.goto, complete=True)
+            self.settle_focus()
             held = True
         if args.zoom is not None:
             self.set_zoom_ppl(args.zoom)
@@ -1749,7 +2012,10 @@ class Viewer:
             row, rc = self.row_of(gl, int(col) - 1)
             x, y = (float(v) for v in self.a["row_pos"][int(row)])
             p = float(self.a["file_pitch"][f])
-            self.cursor_override = self.world_to_screen(x + (int(rc) + 0.5) * p * self.A, y + p / 2)
+            self.settle_focus()
+            self.camera_matrix()
+            self.cursor_override = self.world_to_screen(x + (int(rc) + 0.5) * p * self.A, y + p / 2,
+                                                        float(self.file_top[f]) * self.z_scale())
             held = True
         return held
 
@@ -1760,7 +2026,9 @@ class Viewer:
         n = self.args.frames if self.args.frames is not None else 240
         held = self.apply_script_flags()
         centre = (self.W / 2, self.H / 2)
-        z0, z1 = self.fit_zoom(), 16.0 / self.ref_pitch(centre)
+        if not held:
+            self.fit()                    # the 3D fit backs off for perspective
+        z0, z1 = self.zoom, 16.0 / self.ref_pitch(centre)
         last = time.perf_counter()
         for k in range(n):
             if not held:
@@ -1768,6 +2036,7 @@ class Viewer:
                 self.fly, self.zoom_vel = None, 0.0
                 self.cx, self.cy = centre
                 self.zoom = z0 * (z1 / z0) ** u
+                self.z_focus = self.focus_target() if self.proj == "3d" else 0.0
                 self.cursor_override = (self.map_w / 2, self.fb_h / 2)
             now = time.perf_counter()
             self.frame(now - last)
@@ -1816,6 +2085,14 @@ class Viewer:
             self.set_metric("references")
             self.fit()
             snap("references.png")
+            # the 3D projection: the whole map tilted, then a close pass
+            self.tilt, self.yaw = 55.0, 12.0
+            self.set_proj("3d")
+            self.fit()
+            snap("3d.png")
+            self.set_zoom_ppl(3.0, centre)
+            snap("3d_zoom.png")
+            self.set_proj("2d")
             self.set_metric("tokens")
         if self.args.stats:
             self.print_stats()
@@ -1892,6 +2169,10 @@ def main():
                     help="zoom so the file under the view centre has this many device px per line")
     ap.add_argument("--filter", default=None, metavar="WORD", help="apply a filter")
     ap.add_argument("--step", type=int, default=None, metavar="K", help="step to result K (1-based)")
+    ap.add_argument("--proj", default=None, choices=["2d", "3d"],
+                    help="start in 2D (default) or the tilted 3D projection; 3 toggles, Alt-drag tilts")
+    ap.add_argument("--tilt", type=float, default=None, help="3D tilt in degrees (default 55)")
+    ap.add_argument("--yaw", type=float, default=None, help="3D turn in degrees (default 0)")
     ap.add_argument("--metric", default=None, choices=METRIC_ORDER,
                     help="start with this metric's layout (default tokens); M cycles them")
     ap.add_argument("--inspector", action="store_true",

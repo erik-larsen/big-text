@@ -423,6 +423,7 @@ def build_layout(args, z, meta, metric_name, metric, t0):
              file_cols=cols.astype(np.uint16), file_rows=rows.astype(np.uint32),
              file_cap=cap.astype(np.uint16), file_colw=colw.astype(np.float64),
              file_hue=file_hue.astype(np.uint8), file_row0=file_row0.astype(np.uint32),
+             file_metric=np.asarray(metric, np.float64),
              line_row0=line_row0.astype(np.uint32), row_line=row_line.astype(np.uint32),
              row_col0=row_col0.astype(np.uint16), row_len=row_len.astype(np.uint16),
              row_pos=row_pos.astype(np.float32),

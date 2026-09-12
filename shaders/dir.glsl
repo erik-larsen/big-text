@@ -1,14 +1,17 @@
 // dir.glsl: instanced directory rectangles. One instance per directory,
-// data from tex_dir_f (RGBA32F, two texels per directory: the outer rect,
-// then (pad, depth, hue, 0)). The fragment shader draws the padding ring in
-// the hue at 55 percent over a darker inner tint; the ring is at least one
-// device pixel wide (fwidth gives world units per pixel).
+// data from tex_dir_f (RGBA32F, three texels per directory: the outer rect,
+// (pad, depth, hue, 0), then (z base, height, 0, 0)). The fragment shader
+// draws the padding ring in the hue at 55 percent over a darker inner tint
+// (a solid terrace top in 3D); the ring is at least one device pixel wide
+// (fwidth gives world units per pixel). Positions go through uMVP, which is
+// orthographic in 2D and perspective in 3D; uZScale is 0 in 2D so every
+// height collapses onto the plane.
 #version 330 core
 layout(location = 0) in vec2 aQuad;
 uniform sampler2D uDirF;
-uniform vec2 uOffset;      // world coordinate of the top-left device pixel
-uniform float uScale;      // device pixels per world unit
-uniform vec2 uViewport;    // framebuffer size in device pixels
+uniform mat4 uMVP;
+uniform vec4 uView;        // world rectangle in view (conservative), for culling
+uniform float uZScale;
 uniform vec3 uHue[12];
 out vec2 vWorld;
 flat out vec4 vRect;
@@ -19,16 +22,15 @@ ivec2 tc(int i) { return ivec2(i & 4095, i >> 12); }
 
 void main() {
     int d = gl_InstanceID;
-    vec4 rect = texelFetch(uDirF, tc(2 * d), 0);
-    vec4 meta = texelFetch(uDirF, tc(2 * d + 1), 0);
-    vec2 v0 = uOffset, v1 = uOffset + uViewport / uScale;
+    vec4 rect = texelFetch(uDirF, tc(3 * d), 0);
+    vec4 meta = texelFetch(uDirF, tc(3 * d + 1), 0);
+    vec4 zz = texelFetch(uDirF, tc(3 * d + 2), 0);
     // no early return (see line.glsl): every output is written on every path
-    bool vis = meta.y >= 1.0 && rect.z > v0.x && rect.x < v1.x
-               && rect.w > v0.y && rect.y < v1.y;
+    bool vis = meta.y >= 1.0 && rect.z > uView.x && rect.x < uView.z
+               && rect.w > uView.y && rect.y < uView.w;
     vec2 w = mix(rect.xy, rect.zw, aQuad);
-    vec2 s = (w - uOffset) * uScale;
-    gl_Position = vis ? vec4(s.x / uViewport.x * 2.0 - 1.0, 1.0 - s.y / uViewport.y * 2.0, 0.0, 1.0)
-                      : vec4(-2.0, -2.0, 0.0, 1.0);
+    float z = (zz.x + zz.y) * uZScale;
+    gl_Position = vis ? uMVP * vec4(w, z, 1.0) : vec4(-2.0, -2.0, 0.0, 1.0);
     vWorld = w;
     vRect = rect;
     vPad = meta.x;
@@ -36,17 +38,21 @@ void main() {
 }
 // ---- fragment ----
 #version 330 core
+uniform float uZScale;
 in vec2 vWorld;
 flat in vec4 vRect;
 flat in float vPad;
 flat in vec3 vColor;
 out vec4 frag;
 
+const vec3 BG = vec3(0x1c, 0x1c, 0x1e) / 255.0;
+
 void main() {
     float d = min(min(vWorld.x - vRect.x, vRect.z - vWorld.x),
                   min(vWorld.y - vRect.y, vRect.w - vWorld.y));
     float px = fwidth(vWorld.x);           // world units per device pixel
     float ring = max(vPad, px);            // never thinner than one pixel
-    if (d < ring) frag = vec4(vColor, 0.55);
-    else          frag = vec4(vColor * 0.6, 0.16);
+    if (d < ring) frag = vec4(vColor, uZScale > 0.0 ? 1.0 : 0.55);
+    else          frag = uZScale > 0.0 ? vec4(mix(BG, vColor, 0.16), 1.0)
+                                       : vec4(vColor * 0.6, 0.16);
 }
