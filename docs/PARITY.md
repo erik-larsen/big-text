@@ -1,6 +1,6 @@
 # Parity with the Studio code atlas
 
-The plan for reaching everything the video and the makepad commit messages show, as a checklist. Each row is one observation from `notes/makepad-code-atlas.md`, its state in the current build (commit 5f077e5), and the phase that closes it. A phase is done when every row it owns is checked against a screenshot or a scripted test, not when the code exists. The phases are ordered so each unlocks the next; sizes are single-session, sequential work.
+The plan for reaching everything the video and the makepad commit messages show, as a checklist. Each row is one observation from `notes/makepad-code-atlas.md`, its state in the current build (commit 3634cc1, 2026-09-12), and the phase that closes it. A phase is done when every row it owns is checked against a screenshot or a scripted test, not when the code exists. The phases are ordered so each unlocks the next; sizes are single-session, sequential work.
 
 ## Checklist
 
@@ -68,3 +68,29 @@ The plan for reaching everything the video and the makepad commit messages show,
 - tree-sitter is the only new dependency, added in phase 1 with explicit approval.
 - Lenses are precomputed layouts swapped with a hard cut, which is also what Rik settled on after removing his morph.
 - No parallel agents unless a phase has a separable module and the spend is agreed first.
+
+## Where things stand (2026-09-12, after phase 4)
+
+Done: phases 0 to 4, rows 1 to 28 except the palette and legend buttons of row 24; 30 of the 36 rows are checked. Next: phase 5 (History), then 6 (streaming) and 7 (MCP, disk mode). Not pursued: 120 Hz, 2.5D as a mode of its own.
+
+To resume in a fresh clone (the generated data is not in git):
+
+```bash
+pip install numpy Pillow PyOpenGL glfw fonttools tree-sitter tree-sitter-rust tree-sitter-python tree-sitter-c
+git submodule update --init big-picture makepad
+./atlas_index.py big-picture --out data/big-picture_atlas
+./atlas_index.py makepad/draw makepad/platform --out data/makepad-draw_atlas
+./atlas_resolve.py data/big-picture_atlas
+./atlas_resolve.py data/makepad-draw_atlas
+./atlas_layout.py data/big-picture_atlas
+./atlas_layout.py data/makepad-draw_atlas
+./tests/gen_synthetic_atlas.py
+./tests/check_layout.py data/makepad-draw_atlas && ./tests/test_viewer_input.py && ./tests/test_vt_glyphs.py
+./atlas_viewer.py data/makepad-draw_atlas --shots /tmp/shots --filter Window --stats
+```
+
+Each phase so far: its contract was written into `docs/DESIGN.md` first ("as built" sections at the end), the code was patched in the main session with anchored edits, every behaviour was verified by a screenshot taken with the viewer's flags (`--goto`, `--zoom`, `--filter`, `--step`, `--inspect`, `--inspector`, `--hover`, `--select`, `--lens`, `--metric`, `--proj --tilt --yaw`, `--shots`) and read back, then `docs/shots/README.md`, the README and this file were updated and the phase was committed and pushed. Keep that shape.
+
+Known rough edges, none blocking: the toolbar, status line and filter box overlay the map's corners rather than sitting in their own strip; in 3D the fitted view is a fixed tilt and yaw (55, 12 in the shots) and the labels of far directories can crowd; the Layers lens has no crossing minimisation within a row; the resolver's `ambiguous` and `not found` counts are large because there is no type inference (by design); the vector glyph tier is off unless `--vector-text` is given and switches at a fixed 40 px per line; screenshots differ by two pixels of framebuffer height between runs on this Mac.
+
+Phase 5 starts with a DESIGN.md contract for: `atlas_history.py` (git log --numstat per file into churn and recency arrays, and a list of revisions), a churn colour lens (a per-file colour texture, the same mechanism as the hues), the revision rail (re-index at a commit into a separate atlas directory and switch like a layout), and change lighting between two revisions (files added, removed, changed).
