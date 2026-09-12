@@ -54,6 +54,8 @@ Regenerate everything with:
 - `makepad-draw/3d.png`: the references layout in the 3D projection at tilt 55 and yaw 12, fitted: the fan-in skyline, directories as terraces, tags on the terrace edges.
 - `makepad-draw/3d_zoom.png`: the same at 3 px per line about the centre: text on the near roofs, bars on the far ones, walls occluding.
 - `makepad-draw/3d_text.png`: `--proj 3d --hover platform/src/os/linux/x11/x11_sys.rs:8:12`: text zoom on a roof in perspective with the hover label.
+- `makepad-draw/layers.png`: the Layers lens fitted: rows by dependency rank, the 355-file cycle grouped, hues from the tree.
+- `makepad-draw/selection.png`: the file with the highest fan-in (x11_sys.rs) selected in the Layers lens: its 224 dependants lit in teal, the rest dimmed, the Inspector listing them.
 - `makepad-draw/coverage.png`: the Inspector with nothing selected (`--inspector`): the resolver's coverage block, one line per resolution status with its count.
 - `makepad-draw/inspector.png`: the Inspector on the enum variant `Window` (`--inspect Window`): kind and name, path and line, the enclosing enum, the definition and reference counts, and the references grouped by file, each a click away.
 - `makepad-draw/hover_symbol.png`: the cursor held on `Window` in x11_sys.rs at text zoom: the label reads the resolver's view, `type Window · 2 definitions · 102 references`.

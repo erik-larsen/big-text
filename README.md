@@ -59,6 +59,9 @@ That is 19 files and 15,216 lines, indexed and laid out in well under a second. 
 | `I` / `Tab` | Open or close the Inspector / switch between Inspector and Results |
 | Toolbar or `M` | Switch the area metric: Tokens, References, Lines (a hard cut to another layout) |
 | `3D` button or `3` | The tilted projection: files and directories extruded by the current metric |
+| `Layers` button | The Layers lens: files in rows by dependency rank, cycles grouped, hue kept from the tree |
+| Click a file | Select it: its neighbours in the file graph light up in teal, the rest dim, the Inspector lists uses and used-by |
+| `Shift` + click / `Shift` + drag | Toggle a file in the selection / select every file in a rectangle |
 | `Alt` + drag | Tilt (vertical) and turn (horizontal) the 3D camera; from 2D it switches to 3D |
 | `R` | Refit the map |
 | `Escape` | Clear the filter, then the selection |
@@ -94,6 +97,11 @@ A long line wrapped inside its column at text zoom, the continuation rows hangin
 
 ![wrapped lines](docs/shots/big-picture/wrapped.png)
 
+The Layers lens: every file in a row by its dependency rank, highest on top, the strongly connected component of 355 mutually referencing platform files grouped as one cycle; and a selection of the x11 bindings lighting the 224 files that use them.
+
+![layers lens](docs/shots/makepad-draw/layers.png)
+![selection](docs/shots/makepad-draw/selection.png)
+
 The resolver's view of makepad-draw: hovering `Window` in the x11 bindings, and the Inspector on the enum variant of the same name with its references grouped by file.
 
 ![symbol hover](docs/shots/makepad-draw/hover_symbol.png)
@@ -120,11 +128,12 @@ The contract that the code was built against is [docs/DESIGN.md](docs/DESIGN.md)
 - **Resolver.** `atlas_resolve.py` parses every file with tree-sitter and collects entities (functions, methods, structs, fields, enums, variants, traits, type aliases, consts, statics, modules, macros, type parameters, parameters, locals) and every identifier use. Each use is resolved lexically, in order: the enclosing function's locals, the file, the file's `use` imports through the crate found by its Cargo.toml, a unique name in the crate, a unique name in the corpus, with type parameters, `Self`, enum paths and `Type::method` handled along the way; what is left is ambiguous, external (a crate not in the corpus), missing import, missing macro or not found, and the counts of each are the Inspector's coverage block. No type inference, so a method after a dot with several candidates is "method dispatch", the same category Rik's analyser reports. Rust is covered fully; Python and C get functions, types, parameters and locals. All of makepad resolves in 25 seconds on ten cores: 864k entities and 4.7 million references, 64 percent of them resolved, across 317 crates; Rik's Inspector reports 722k entities and 1.3 million edges for the same tree, so the scale matches even though the rules do not.
 - **Filter.** A word that names an entity lists its definitions with their kinds and every reference with its status; any other word is a whole-word regex over the corpus in a thread, chunked so the frame loop keeps running, with mentions inside comments and strings excluded. `Window` in makepad-draw finds 2 definitions (the x11 type alias and an enum variant) and 152 references, 91 of them resolved to one or the other; Rik's analyser reports 119 and 1472 for all of makepad.
 - **Fly-to** is van Wijk and Nuij's smooth zoom-and-pan, which zooms out and back in between distant places.
+- **Layers and selection.** The resolver's references give a file graph, A to B when a reference in A resolves into B. The Layers lens runs Tarjan on it, condenses the cycles, ranks each component by its longest path down to a file that references nothing in the corpus, and lays the ranks out as rows (highest on top, heights by weight to the 0.6 so a giant cycle does not squeeze the others), cycles as groups inside their row and files keeping the hue of their real directory; the crumb trail reads "layer 3 · 355 files › cycle". A click selects a file, Shift-click toggles, Shift-drag marquees; the selection's neighbourhood (both directions) is lit in teal, everything else dims, and the Inspector lists the selected files with their in and out degrees, then the files they use and the files that use them.
 - **3D.** Every world shader takes one model-view-projection matrix, orthographic in 2D and perspective in 3D, so the flat view is unchanged. In 3D the camera orbits a focus point at tilt and yaw, at a distance chosen so one world unit at the focus is still the same number of pixels as in 2D, which keeps the zoom semantics and the per-file rung: a file's pixels per line is foreshortened by its depth, so one frame has text near and bars far. Directories are terraces of five world units per level, files rise from their terrace by the square root of the current metric, an instanced wall pass draws the four sides of every rectangle shaded by which way they face, and the focus height rides on the roof of the file under the centre so a close camera never ends up inside a building. Picking unprojects the cursor onto that roof; labels are billboards at projected corners.
 
 Measured on an M4 MacBook at a 2940 by 1658 framebuffer, `--frames 300 --stats` over the scripted zoom from fit to text: big-picture 1.2 ms mean and 3.4 ms 99th percentile; makepad-draw 1.6 and 4.4 ms; the full makepad tree 4.5 and 23.7 ms, the tail being the fitted view where all 3.67 million lines are visible, and 1.3 ms once zoomed to text.
 
-Not built: lenses other than Folders and Size, history, selection and the Layers view, and a streaming working set (the whole corpus is resident, which is fine to a few million lines).
+Not built: history, the palette and legend buttons, and a streaming working set (the whole corpus is resident, which is fine to a few million lines).
 
 ## Decisions so far
 
@@ -155,7 +164,7 @@ big-text/
   notes/makepad-code-atlas.md  what the public makepad history and the video say about the code atlas
   atlas_index.py               source tree -> data/<name>_atlas/index.npz + index.json
   atlas_resolve.py             tree-sitter entities and lexically resolved references -> resolve.npz + resolve.json
-  atlas_layout.py              index -> layout.npz (tokens), layout_references.npz, layout_lines.npz (+ --preview PNG)
+  atlas_layout.py              index -> layout.npz (tokens), layout_references.npz, layout_lines.npz, layout_layers.npz (+ --preview PNG)
   atlas_font.py                monospace font -> raster glyph atlas
   atlas_viewer.py              the viewer
   vt_glyphs.py                 the Dobbie vector-texture glyph tier

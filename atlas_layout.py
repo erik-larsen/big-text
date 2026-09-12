@@ -108,8 +108,20 @@ def layout_tree(dirs, file_weight, file_dir, world):
         dir_pad[d] = pad
         kids = [(file_weight[f], 0, f) for f in dirs[d]["files"]] \
             + [(dir_weight[c], 1, c) for c in dirs[d]["children"]]
-        kids.sort(key=lambda k: -k[0])
-        rects = squarify([k[0] for k in kids], x0 + pad, y0 + pad, x1 - pad, y1 - pad)
+        if dirs[d].get("rows"):           # the Layers lens: children stacked top to bottom
+            # row heights by weight^0.6, so a giant cycle does not squeeze
+            # the thin layers above and below it into slivers
+            shares = [max(k[0], 1e-9) ** 0.6 for k in kids]
+            total = sum(shares) or 1.0
+            h = (y1 - y0 - 2 * pad)
+            rects, y = [], y0 + pad
+            for share in shares:
+                dy = h * share / total
+                rects.append((x0 + pad, y, x1 - pad, y + dy))
+                y += dy
+        else:
+            kids.sort(key=lambda k: -k[0])
+            rects = squarify([k[0] for k in kids], x0 + pad, y0 + pad, x1 - pad, y1 - pad)
         for (wt, is_dir, idx), r in zip(kids, rects):
             if is_dir:
                 place(idx, tuple(r))
@@ -118,6 +130,125 @@ def layout_tree(dirs, file_weight, file_dir, world):
 
     place(0, (0.0, 0.0, world[0], world[1]))
     return dir_rect, dir_pad, file_rect
+
+
+# ---------------------------------------------------------------- layers
+
+def file_graph(resolve_path, n_files):
+    """Directed edges between files: A -> B when a reference in A resolves
+    to an entity defined in B. Returns (src, dst, count)."""
+    r = np.load(resolve_path)
+    ok = r["ref_ent"] >= 0
+    src = r["ref_file"][ok].astype(np.int64)
+    dst = r["ent_file"][r["ref_ent"][ok]].astype(np.int64)
+    m = src != dst
+    key = src[m] * n_files + dst[m]
+    u, cnt = np.unique(key, return_counts=True)
+    return u // n_files, u % n_files, cnt
+
+
+def strongly_connected(n, src, dst):
+    """Tarjan, iterative. Component ids come out in reverse topological
+    order: every successor of a component has a smaller id."""
+    adj = [[] for _ in range(n)]
+    for a, b in zip(src.tolist(), dst.tolist()):
+        adj[a].append(b)
+    index, low, on, comp = [-1] * n, [0] * n, [False] * n, [-1] * n
+    stack, counter, ncomp = [], 0, 0
+    for root in range(n):
+        if index[root] != -1:
+            continue
+        work = [(root, 0)]
+        while work:
+            v, i = work[-1]
+            if i == 0:
+                index[v] = low[v] = counter
+                counter += 1
+                stack.append(v)
+                on[v] = True
+            recurse = False
+            while i < len(adj[v]):
+                w = adj[v][i]
+                i += 1
+                if index[w] == -1:
+                    work[-1] = (v, i)
+                    work.append((w, 0))
+                    recurse = True
+                    break
+                elif on[w]:
+                    low[v] = min(low[v], index[w])
+            if recurse:
+                continue
+            work[-1] = (v, i)
+            if low[v] == index[v]:
+                while True:
+                    w = stack.pop()
+                    on[w] = False
+                    comp[w] = ncomp
+                    if w == v:
+                        break
+                ncomp += 1
+            work.pop()
+            if work:
+                u, _ = work[-1]
+                low[u] = min(low[u], low[v])
+    return np.array(comp, np.int64), ncomp
+
+
+def layers_dirs(meta, resolve_path, weight):
+    """The Layers lens as a pseudo directory tree: rank rows (highest rank
+    on top) holding files and, for cycles of more than one file, a group.
+    Rank is the longest path down to a file that references nothing in the
+    corpus; files with no edges at all sit in a bottom row of their own."""
+    n = len(meta["files"])
+    src, dst, cnt = file_graph(resolve_path, n)
+    comp, ncomp = strongly_connected(n, src, dst)
+    csrc, cdst = comp[src], comp[dst]
+    succ = [set() for _ in range(ncomp)]
+    for a, b in zip(csrc.tolist(), cdst.tolist()):
+        if a != b:
+            succ[a].add(b)
+    rank = np.zeros(ncomp, np.int64)
+    for c in range(ncomp):                 # successors have smaller ids
+        rank[c] = max((rank[d] + 1 for d in succ[c]), default=0)
+    connected = np.zeros(n, bool)
+    connected[src] = True
+    connected[dst] = True
+    file_rank = np.where(connected, rank[comp], -1)
+    members = [[] for _ in range(ncomp)]
+    for f in range(n):
+        members[comp[f]].append(f)
+    dirs = [{"path": "", "parent": -1, "children": [], "files": [], "top": 0,
+             "label": meta["name"], "rows": True, "hue": 0}]
+    file_dir = np.zeros(n, np.int64)
+    for r in sorted(set(file_rank.tolist()), reverse=True):
+        in_row = np.flatnonzero(file_rank == r)
+        row = len(dirs)
+        label = f"layer {r} · {len(in_row)} files" if r >= 0 else f"no references · {len(in_row)} files"
+        dirs.append({"path": f"layer{r}", "parent": 0, "children": [], "files": [], "top": row,
+                     "label": label, "hue": (r % 12) if r >= 0 else 0})
+        dirs[0]["children"].append(row)
+        done = set()
+        for f in sorted(in_row.tolist(), key=lambda f: meta["files"][f]["path"]):
+            c = int(comp[f])
+            if len(members[c]) > 1:
+                if c in done:
+                    continue
+                done.add(c)
+                g = len(dirs)
+                dirs.append({"path": f"layer{r}/cycle{c}", "parent": row, "children": [],
+                             "files": list(members[c]), "top": row,
+                             "label": f"cycle · {len(members[c])} files", "hue": dirs[row]["hue"]})
+                dirs[row]["children"].append(g)
+                for m in members[c]:
+                    file_dir[m] = g
+            else:
+                dirs[row]["files"].append(f)
+                file_dir[f] = row
+    stats = {"edges": int(len(src)), "cycles": int(sum(1 for m in members if len(m) > 1)),
+             "in_cycles": int(sum(len(m) for m in members if len(m) > 1)),
+             "layers": int(file_rank.max()) + 1, "unconnected": int((~connected).sum())}
+    return dirs, file_dir, stats
 
 
 # ---------------------------------------------------------------- files
@@ -379,26 +510,34 @@ def file_metric(name, z, files, file_line0, atlas):
     return np.array([f["bytes"] for f in files], np.float64)
 
 
-def build_layout(args, z, meta, metric_name, metric, t0):
+def build_layout(args, z, meta, metric_name, metric, t0, lens="folders"):
     dirs, files = meta["dirs"], meta["files"]
     file_line0, line_len, line_indent = z["file_line0"], z["line_len"], z["line_indent"]
-    file_dir = z["file_dir"]
-    n_files, n_lines, n_dirs = len(files), len(line_len), len(dirs)
+    file_dir = z["file_dir"].astype(np.int64)
+    n_files, n_lines = len(files), len(line_len)
     aspect = parse_aspect(args.aspect)
     world = np.array([WORLD_W, WORLD_W / aspect])
     weight = np.maximum(metric, 1.0)          # an empty file still gets a sliver
 
+    # hue: the top-level directory's position among the root's children, plus
+    # one so that the root and its loose files (hue 0) differ from the first;
+    # files keep their tree's hue in every lens
+    top_hue = np.zeros(len(dirs), np.int64)
+    for i, c in enumerate(dirs[0]["children"]):
+        top_hue[c] = (i + 1) % N_HUES
+    tree_hue = np.array([top_hue[d["top"]] for d in dirs], np.int64)
+    file_hue = tree_hue[file_dir]
+    lens_stats = {}
+    if lens == "layers":
+        dirs, file_dir, lens_stats = layers_dirs(meta, Path(args.atlas) / "resolve.npz", weight)
+        dir_hue = np.array([d["hue"] for d in dirs], np.int64)
+    else:
+        dir_hue = tree_hue
+    n_dirs = len(dirs)
     dir_rect, dir_pad, file_rect = layout_tree(dirs, weight, file_dir, world)
     dir_depth = np.zeros(n_dirs, np.int64)
     for d in range(1, n_dirs):
         dir_depth[d] = dir_depth[dirs[d]["parent"]] + 1
-    # hue: the top-level directory's position among the root's children, plus
-    # one so that the root and its loose files (hue 0) differ from the first
-    top_hue = np.zeros(n_dirs, np.int64)
-    for i, c in enumerate(dirs[0]["children"]):
-        top_hue[c] = (i + 1) % N_HUES
-    dir_hue = np.array([top_hue[d["top"]] for d in dirs], np.int64)
-    file_hue = dir_hue[file_dir]
 
     pitch, cols, rows, cap, colw = layout_files(file_rect, file_line0, line_len, args.char_aspect)
     line_row0, row_line, row_col0, row_len, row_first = wrap_rows(file_line0, line_len, cap)
@@ -414,7 +553,7 @@ def build_layout(args, z, meta, metric_name, metric, t0):
     e_row = line_row0[ge] - file_row0[f]
     irect, iitem = item_rects(z["item_file"], s_row, e_row, file_rect, file_row0, pitch, rows, colw)
 
-    suffix = "" if metric_name == "tokens" else "_" + metric_name
+    suffix = "_layers" if lens == "layers" else ("" if metric_name == "tokens" else "_" + metric_name)
     np.savez(os.path.join(args.atlas, f"layout{suffix}.npz"),
              world=world.astype(np.float64),
              dir_rect=dir_rect.astype(np.float64), dir_pad=dir_pad.astype(np.float64),
@@ -423,29 +562,34 @@ def build_layout(args, z, meta, metric_name, metric, t0):
              file_cols=cols.astype(np.uint16), file_rows=rows.astype(np.uint32),
              file_cap=cap.astype(np.uint16), file_colw=colw.astype(np.float64),
              file_hue=file_hue.astype(np.uint8), file_row0=file_row0.astype(np.uint32),
-             file_metric=np.asarray(metric, np.float64),
+             file_metric=np.asarray(metric, np.float64), file_dir=np.asarray(file_dir, np.uint32),
              line_row0=line_row0.astype(np.uint32), row_line=row_line.astype(np.uint32),
              row_col0=row_col0.astype(np.uint16), row_len=row_len.astype(np.uint16),
              row_pos=row_pos.astype(np.float32),
              item_rect=irect.astype(np.float32), item_rect_item=iitem.astype(np.uint32))
     jdirs = []
     for d in range(n_dirs):
-        label = meta["name"] if d == 0 else os.path.basename(dirs[d]["path"]) + "/"
+        label = dirs[d].get("label") or (meta["name"] if d == 0 else os.path.basename(dirs[d]["path"]) + "/")
         jdirs.append({"label": label, "rect": [float(v) for v in dir_rect[d]],
-                      "depth": int(dir_depth[d]), "hue": int(dir_hue[d])})
+                      "depth": int(dir_depth[d]), "hue": int(dir_hue[d]),
+                      "parent": int(dirs[d]["parent"]), "children": [int(c) for c in dirs[d]["children"]],
+                      "files": [int(f) for f in dirs[d]["files"]]})
     with open(os.path.join(args.atlas, f"layout{suffix}.json"), "w") as fh:
         json.dump({"world": [float(world[0]), float(world[1])], "aspect": args.aspect,
-                   "metric": metric_name, "char_aspect": args.char_aspect, "hang": HANG,
-                   "dirs": jdirs}, fh)
+                   "metric": metric_name, "lens": lens, "char_aspect": args.char_aspect,
+                   "hang": HANG, "lens_stats": lens_stats, "dirs": jdirs}, fh)
 
     sides = np.minimum(file_rect[:, 2] - file_rect[:, 0], file_rect[:, 3] - file_rect[:, 1])
     n_rows = len(row_line)
-    print(f"{args.atlas} [{metric_name}]: {n_files} files, {n_dirs} dirs, {n_lines} lines in "
+    print(f"{args.atlas} [{lens if lens != 'folders' else metric_name}]: {n_files} files, {n_dirs} dirs, "
+          + (f"{lens_stats['layers']} layers, {lens_stats['cycles']} cycles of {lens_stats['in_cycles']} files, "
+             f"{lens_stats['unconnected']} unconnected; " if lens_stats else "")
+          + f"{n_lines} lines in "
           f"{n_rows} rows ({n_rows - n_lines} wrapped), {len(irect)} item rects; "
           f"world {world[0]:.0f}x{world[1]:.1f}, pitch {pitch.min():.4f}..{pitch.max():.3f} "
           f"(median {np.median(pitch):.3f}), columns 1..{cols.max()} (mean {cols.mean():.2f}), "
           f"{int((sides < 0.02).sum())} slivers under 0.02, {time.time() - t0:.2f}s")
-    if args.preview and metric_name == (args.metric if args.metric != "all" else "tokens"):
+    if args.preview and lens == "folders" and metric_name == (args.metric if args.metric != "all" else "tokens"):
         render_preview(args.preview, world, jdirs, dir_rect, dir_pad, dir_hue, file_rect,
                        file_hue, pitch, cols, rows, cap, colw, file_row0, row_pos, row_len,
                        row_indent, args.char_aspect, args.preview_width)
@@ -460,6 +604,9 @@ def main():
                     help="file size metric for the treemap; 'all' (default) writes layout.npz "
                          "(tokens) plus layout_references.npz (when resolve.npz exists) and "
                          "layout_lines.npz, which the viewer switches between")
+    ap.add_argument("--lens", choices=["all", "folders", "layers"], default="all",
+                    help="folders: the directory treemap; layers: files in rows by dependency rank "
+                         "with cycles grouped (needs resolve.npz); all (default) writes both")
     ap.add_argument("--char-aspect", type=float, default=None,
                     help="character advance / line pitch of the font (default: atlas_font.py's "
                          "metric for its default font, Menlo 0.569; 0.6 if that font is missing)")
@@ -483,7 +630,15 @@ def main():
                 continue
             raise SystemExit(f"error: --metric references needs {args.atlas}/resolve.npz; "
                              f"run ./atlas_resolve.py {args.atlas}")
-        build_layout(args, z, meta, name, metric, t0)
+        if args.lens in ("folders", "all"):
+            build_layout(args, z, meta, name, metric, t0)
+    if args.lens in ("layers", "all"):
+        if (Path(args.atlas) / "resolve.npz").exists():
+            metric = file_metric("tokens", z, meta["files"], z["file_line0"], args.atlas)
+            build_layout(args, z, meta, "tokens", metric, t0, lens="layers")
+        elif args.lens == "layers":
+            raise SystemExit(f"error: --lens layers needs {args.atlas}/resolve.npz; "
+                             f"run ./atlas_resolve.py {args.atlas}")
 
 
 if __name__ == "__main__":

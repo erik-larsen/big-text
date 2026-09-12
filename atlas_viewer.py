@@ -194,7 +194,7 @@ def load_layouts(d):
         L["layout"] = js
         if "row_pos" not in L:
             raise SystemExit(f"error: {npz} predates wrapped rows; rerun ./atlas_layout.py {d}")
-        out[js.get("metric", "tokens")] = L
+        out["layers" if js.get("lens") == "layers" else js.get("metric", "tokens")] = L
     if not out:
         raise SystemExit(f"error: no layout.npz in {d}; run ./atlas_layout.py {d}")
     return out
@@ -210,6 +210,14 @@ def load_atlas(d, metric=None):
     a["metric"] = metric
     a.update(a["layouts"][metric])
     return a
+
+
+def csr(src, dst, n):
+    """(ptr, idx) adjacency of src -> dst edges, sorted by src."""
+    order = np.argsort(src, kind="stable")
+    ptr = np.zeros(n + 1, np.int64)
+    np.add.at(ptr, src + 1, 1)
+    return np.cumsum(ptr), dst[order]
 
 
 RESOLVED = {"local", "file", "import", "crate", "global", "generic", "self"}
@@ -238,6 +246,15 @@ def load_resolve(d, atlas):
     ok = r["ref_ent"] >= 0
     r["ent_refs"] = np.bincount(r["ref_ent"][ok], minlength=len(r["ent_file"]))
     r["defs_by_name"] = np.bincount(r["ent_name"], minlength=len(r["names"]))
+    # the file graph: A -> B when a reference in A resolves into B
+    n = len(atlas["file_line0"]) - 1
+    src = r["ref_file"][ok].astype(np.int64)
+    dst = r["ent_file"][r["ref_ent"][ok]].astype(np.int64)
+    m = src != dst
+    key = np.unique(src[m] * n + dst[m])
+    es, ed = key // n, key % n
+    r["out_ptr"], r["out_idx"] = csr(es, ed, n)
+    r["in_ptr"], r["in_idx"] = csr(ed, es, n)
     return r
 
 
@@ -370,10 +387,13 @@ class Viewer:
         self.args = args
         self.scripted = args.frames is not None or args.shots or args.stats
         t0 = time.perf_counter()
-        self.a = load_atlas(args.atlas, getattr(args, "metric", None))
+        self.a = load_atlas(args.atlas, "layers" if getattr(args, "lens", None) == "layers"
+                            else getattr(args, "metric", None))
         a = self.a
         self.res = load_resolve(args.atlas, a)
         self.metrics = [m for m in METRIC_ORDER if m in a["layouts"]]
+        self.has_layers = "layers" in a["layouts"]
+        self.folders_metric = a["metric"] if a["metric"] != "layers" else "tokens"
         self.hang = int(a["layout"].get("hang", 2))
         # projection: 2d is orthographic; 3d is a perspective camera that
         # orbits the focus point (cx, cy) at tilt and yaw, with files and
@@ -400,8 +420,10 @@ class Viewer:
         self.name = a["index"].get("name", Path(args.atlas).name)
         self.paths = [f["path"] for f in a["index"]["files"]]
         self.langs = [f.get("lang") for f in a["index"]["files"]]
-        self.dir_labels = [d["label"] for d in a["layout"]["dirs"]]
-        self.dir_parent = np.array([d["parent"] for d in a["index"]["dirs"]], np.int64)
+        self.refresh_dirs()
+        self.sel = np.zeros(self.n_files, bool)       # selected files
+        self.nb = np.zeros(self.n_files, bool)        # their neighbourhood in the file graph
+        self.marquee = None
         self.item_names = [it["name"] for it in a["index"]["items"]]
         self.build_dir_tags()
         self.item_rect_file = a["item_file"][a["item_rect_item"]]
@@ -564,6 +586,23 @@ class Viewer:
             glActiveTexture(GL_TEXTURE0 + i)
             glBindTexture(GL_TEXTURE_2D, tex)
 
+    @property
+    def lens(self):
+        return "layers" if self.a["layout"].get("lens") == "layers" else "folders"
+
+    def refresh_dirs(self):
+        """Directory labels, parents and children of the active layout (the
+        Layers lens has its own pseudo-tree of rank rows and cycles)."""
+        a = self.a
+        jd = a["layout"]["dirs"]
+        self.dir_labels = [d["label"] for d in jd]
+        if jd and "parent" in jd[0]:
+            self.dir_parent = np.array([d["parent"] for d in jd], np.int64)
+            self.dir_children = [d["children"] for d in jd]
+        else:
+            self.dir_parent = np.array([d["parent"] for d in a["index"]["dirs"]], np.int64)
+            self.dir_children = [d["children"] for d in a["index"]["dirs"]]
+
     def compute_heights(self):
         """z base and height per file and directory from the current layout's
         metric: directories are terraces of DIR_STEP per level, files sit on
@@ -646,13 +685,25 @@ class Viewer:
             glBindTexture(GL_TEXTURE_2D, tex)
 
     def set_metric(self, metric):
-        """Switch to another metric's layout: a hard cut, as in the video.
-        The world is the same size, so the camera stays where it is."""
-        if metric == self.a["metric"] or metric not in self.a["layouts"]:
-            return
+        self.set_layout(metric)
+
+    def set_lens(self, lens):
+        self.set_layout("layers" if lens == "layers" else self.folders_metric)
+
+    def set_layout(self, key):
+        """Switch to another layout (a metric of the Folders lens, or the
+        Layers lens): a hard cut, as in the video. The world is the same
+        size, so the camera stays where it is."""
         a = self.a
-        a.update(a["layouts"][metric])
-        a["metric"] = metric
+        if key not in a["layouts"] or key == a["metric"]:
+            return
+        a.update(a["layouts"][key])
+        a["metric"] = key
+        if key != "layers":
+            self.folders_metric = key
+        self.n_dirs = len(a["dir_rect"])
+        self.dir_scale = np.ones(self.n_dirs)
+        self.refresh_dirs()
         self.n_rows = len(a["row_pos"])
         self.item_rect_file = a["item_file"][a["item_rect_item"]]
         self.build_hover_grid()
@@ -971,23 +1022,37 @@ class Viewer:
         if action == glfw.PRESS:
             self.fly = None
             self.zoom_vel = 0.0
-            self.drag = (x, y)
             self.tilting = bool(mods & glfw.MOD_ALT)
+            over_ui = any(rc and in_rect(sx, sy, rc) for rc in [self.panel_rect, self.filter_rect]
+                          + [r for r, _ in self.toolbar])
+            if (mods & glfw.MOD_SHIFT) and button == glfw.MOUSE_BUTTON_LEFT and not over_ui:
+                self.marquee = [sx, sy, sx, sy]       # Shift-drag selects a rectangle
+                self.drag = None
+            else:
+                self.drag = (x, y)
             self.press = (x, y)
         else:
-            if (self.press is not None and abs(x - self.press[0]) < 3
-                    and abs(y - self.press[1]) < 3 and button == glfw.MOUSE_BUTTON_LEFT):
+            moved = self.press is not None and (abs(x - self.press[0]) >= 3 or abs(y - self.press[1]) >= 3)
+            if self.marquee is not None:
+                if moved:
+                    self.select_marquee(self.marquee, toggle=False)
+                else:
+                    self.click(sx, sy, toggle=True)   # Shift-click toggles one file
+                self.marquee = None
+            elif not moved and button == glfw.MOUSE_BUTTON_LEFT:
                 self.click(sx, sy)
             self.drag = None
             self.press = None
 
-    def click(self, sx, sy):
+    def click(self, sx, sy, toggle=False):
         for rect, act in self.toolbar:
             if in_rect(sx, sy, rect):
                 if act[0] == "metric":
                     self.set_metric(act[1])
                 elif act[0] == "proj":
                     self.set_proj(act[1])
+                elif act[0] == "lens":
+                    self.set_lens(act[1])
                 return
         if self.filter_rect and in_rect(sx, sy, self.filter_rect):
             self.filter_focus = True
@@ -1005,18 +1070,30 @@ class Viewer:
                     self.goto_result(act)
             return
         self.filter_focus = False
-        # a click on an identifier at text zoom selects it in the Inspector
-        if self.res is not None and self.hover is not None and self.rung[self.hover[0]] == 3:
-            f, j, col = self.hover
-            sym = symbol_at(self.res, f, j, col) if j >= 0 else None
-            if sym is not None:
-                self.select_symbol(sym)
+        if self.hover is None:
+            if not toggle:
+                self.clear_selection()
+            return
+        f, j, col = self.hover
+        # Shift-click toggles the file; a click on an identifier at text zoom
+        # selects it in the Inspector; any other click selects the file
+        if toggle:
+            self.select_files([f], toggle=True)
+            return
+        if self.res is not None and self.rung[f] == 3 and j >= 0:
+            sym = symbol_at(self.res, f, j, col)
+            if sym is not None and self.select_symbol(sym):
+                return
+        self.select_files([f])
 
     def on_cursor(self, win, x, y):
         if self.scripted:             # real input must not disturb a scripted run
             return
         self.cursor_pt = (x, y)
         self.cursor = (x * self.px, y * self.px)
+        if self.marquee is not None:
+            self.marquee[2], self.marquee[3] = x * self.px, y * self.px
+            return
         if self.drag:
             dx, dy = (x - self.drag[0]) * self.px, (y - self.drag[1]) * self.px
             if self.tilting:              # Alt-drag: tilt and turn the 3D camera
@@ -1067,6 +1144,9 @@ class Viewer:
             elif self.result_i >= 0:
                 self.result_i = -1
                 self.update_file_flags()
+            elif self.sel.any() or self.selected is not None:
+                self.selected = None
+                self.clear_selection()
             return
         if key in (glfw.KEY_ENTER, glfw.KEY_KP_ENTER, glfw.KEY_DOWN):
             self.step(1)
@@ -1229,6 +1309,8 @@ class Viewer:
     def inspector_rows(self):
         res, width = self.res, self.panel_chars()
         e = self.selected
+        if e is None and self.sel.any():
+            return self.selection_rows()
         if e is None:
             st = res["stats"]
             rows = [(f"Coverage · {st['crates']} crates", YELLOW, -1),
@@ -1275,6 +1357,98 @@ class Viewer:
     def short_path(self, path, width):
         return path if len(path) <= width else "…" + path[len(path) - width + 1:]
 
+    def select_files(self, files, toggle=False):
+        """Select files (replacing, or toggling with Shift) and light their
+        neighbourhood: the files they reference and the files that
+        reference them. The Inspector follows."""
+        files = np.asarray(files, np.int64)
+        if toggle:
+            self.sel[files] = ~self.sel[files]
+        else:
+            self.sel[:] = False
+            self.sel[files] = True
+        self.update_neighbours()
+        if self.sel.any():
+            self.selected = None
+            fitted = self.is_fitted()
+            self.inspector_open = True
+            self.panel_scroll = 0
+            self.refresh_panel()
+            if fitted:
+                self.fit()
+
+    def update_neighbours(self):
+        self.nb[:] = False
+        if self.res is None or not self.sel.any():
+            return
+        for f in np.flatnonzero(self.sel):
+            self.nb[self.res["out_idx"][self.res["out_ptr"][f]:self.res["out_ptr"][f + 1]]] = True
+            self.nb[self.res["in_idx"][self.res["in_ptr"][f]:self.res["in_ptr"][f + 1]]] = True
+        self.nb &= ~self.sel
+
+    def clear_selection(self):
+        self.sel[:] = False
+        self.nb[:] = False
+        self.refresh_panel()
+
+    def file_screen_rects(self):
+        """Device-pixel bounding boxes of every file (for the marquee)."""
+        r = self.a["file_rect"]
+        if self.proj != "3d":
+            x0, y0, _, _ = self.view()
+            return (r - [x0, y0, x0, y0]) * self.zoom
+        n = len(r)
+        c = np.empty((n, 4, 4))
+        c[:, 0, :2] = r[:, [0, 1]]; c[:, 1, :2] = r[:, [2, 1]]
+        c[:, 2, :2] = r[:, [0, 3]]; c[:, 3, :2] = r[:, [2, 3]]
+        c[:, :, 2] = self.file_top[:, None]
+        c[:, :, 3] = 1.0
+        clip = c @ self.M.T
+        w = np.where(clip[:, :, 3] > 1e-6, clip[:, :, 3], np.nan)
+        sx = (clip[:, :, 0] / w + 1) * 0.5 * self.map_w
+        sy = (1 - clip[:, :, 1] / w) * 0.5 * self.fb_h
+        with np.errstate(invalid="ignore"):
+            out = np.stack([np.nanmin(sx, 1), np.nanmin(sy, 1), np.nanmax(sx, 1), np.nanmax(sy, 1)], 1)
+        out[np.isnan(out).any(axis=1)] = -1e9
+        return out
+
+    def select_marquee(self, m, toggle):
+        x0, x1 = sorted((m[0], m[2]))
+        y0, y1 = sorted((m[1], m[3]))
+        sr = self.file_screen_rects()
+        hit = (sr[:, 2] > x0) & (sr[:, 0] < x1) & (sr[:, 3] > y0) & (sr[:, 1] < y1) & self.visible
+        if hit.any():
+            self.select_files(np.flatnonzero(hit), toggle=toggle)
+
+    def selection_rows(self):
+        res, width = self.res, self.panel_chars()
+        files = np.flatnonzero(self.sel)
+        rows = [(f"Selection · {len(files)} file{'s' if len(files) != 1 else ''}", YELLOW, -1)]
+        for f in files[:60]:
+            o = int(res["out_ptr"][f + 1] - res["out_ptr"][f]) if res is not None else 0
+            i = int(res["in_ptr"][f + 1] - res["in_ptr"][f]) if res is not None else 0
+            rows.append((self.short_path(self.paths[f], width - 12).ljust(width - 12) + f"{o:>4}→ {i:>4}←", UI_TEXT,
+                         ("goto", int(f), int(self.a["file_line0"][f]), 0)))
+        if len(files) > 60:
+            rows.append((f"… {len(files) - 60} more", UI_DIM, -1))
+        if res is not None:
+            uses = np.zeros(self.n_files, bool)
+            used = np.zeros(self.n_files, bool)
+            for f in files:
+                uses[res["out_idx"][res["out_ptr"][f]:res["out_ptr"][f + 1]]] = True
+                used[res["in_idx"][res["in_ptr"][f]:res["in_ptr"][f + 1]]] = True
+            uses &= ~self.sel
+            used &= ~self.sel
+            for title, mask in (("Uses", uses), ("Used by", used)):
+                idx = np.flatnonzero(mask)
+                rows.append((f"{title} ({len(idx)} files)", YELLOW, -1))
+                for g in idx[:40]:
+                    rows.append((self.short_path(self.paths[g], width), UI_DIM,
+                                 ("goto", int(g), int(self.a["file_line0"][g]), 0)))
+                if len(idx) > 40:
+                    rows.append((f"… {len(idx) - 40} more", UI_DIM, -1))
+        return rows
+
     def select_symbol(self, sym):
         """Select the entity of a symbol (a reference selects its target)."""
         kind, i = sym
@@ -1283,6 +1457,8 @@ class Viewer:
             return False
         fitted = self.is_fitted()
         self.selected = e
+        self.sel[:] = False
+        self.nb[:] = False
         self.inspector_open = True
         self.panel_scroll = 0
         self.refresh_panel()
@@ -1485,7 +1661,6 @@ class Viewer:
         area = (r[:, 2] - r[:, 0]) * (r[:, 3] - r[:, 1])
         inner = (np.maximum(r[:, 2] - r[:, 0] - 2 * pad, 0)
                  * np.maximum(r[:, 3] - r[:, 1] - 2 * pad, 0))
-        dirs = a["index"]["dirs"]
         self.dir_tags = [None] * self.n_dirs
         chain = [""] * self.n_dirs         # the names a hidden ancestor passes down
         for d in np.argsort(a["dir_depth"], kind="stable"):
@@ -1493,7 +1668,7 @@ class Viewer:
                 continue
             name = self.dir_labels[d].rstrip("/")
             prefix = chain[self.dir_parent[d]]
-            kids = dirs[d]["children"]
+            kids = self.dir_children[d]
             hidden = len(kids) == 1 and area[kids[0]] >= 0.85 * inner[d]
             if hidden:
                 chain[d] = f"{prefix} · {name}" if prefix else name
@@ -1584,6 +1759,11 @@ class Viewer:
             if self.current_file >= 0:
                 flags[self.current_file] |= 4
             flags[self.dimmed] |= 8
+        if self.sel.any():                # the selection and its neighbourhood lit, the rest dimmed
+            flags[self.sel] |= 16
+            flags[self.nb] |= 32
+            if self.results is None or len(self.filter_text) < 2:
+                flags[~(self.sel | self.nb)] |= 8
         # rung 0 draws every step-th line so the density stays about one
         # bar per pixel row; the step goes to the shader as two bytes
         self.file_step = np.ones(self.n_files, np.int64)
@@ -1818,7 +1998,9 @@ class Viewer:
         self.toolbar = []
         tx, ty = m, m
         th = size + 2 * pad * 0.6
-        groups = [[("Folders", ("lens", "folders"), True)],
+        lens = self.lens
+        groups = [[("Folders", ("lens", "folders"), lens == "folders")]
+                  + ([("Layers", ("lens", "layers"), lens == "layers")] if self.has_layers else []),
                   [("2D", ("proj", "2d"), self.proj != "3d"), ("3D", ("proj", "3d"), self.proj == "3d")],
                   [(mt.capitalize(), ("metric", mt), mt == self.a["metric"]) for mt in self.metrics]]
         for gi, group in enumerate(groups):
@@ -1830,6 +2012,12 @@ class Viewer:
                 label(tx + pad, ty + pad * 0.6, text, color=YELLOW if active else UI_TEXT)
                 self.toolbar.append(((tx, ty, tx + bw, ty + th), act))
                 tx += bw + 2 * s
+
+        if self.marquee is not None:
+            x0, x1 = sorted((self.marquee[0], self.marquee[2]))
+            y0, y1 = sorted((self.marquee[1], self.marquee[3]))
+            box(x0, y0, x1, y1, YELLOW, 0.12)
+            box(x0, y0, x1, y1, YELLOW, 1.0, border=1.5 * s)
 
         # crumb trail, bottom left
         bw = len(self.crumb) * cw + 2 * pad
@@ -1990,6 +2178,15 @@ class Viewer:
                 raise SystemExit("error: --step needs results; give --filter WORD with hits")
             self.goto_result((args.step - 1) % len(self.results["order"]), complete=True)
             held = True
+        if args.select:
+            files = []
+            for path in args.select.split(","):
+                m = [i for i, p in enumerate(self.paths) if p == path or p.endswith("/" + path)]
+                if not m:
+                    raise SystemExit(f"error: --select: no file matches '{path}'")
+                files.append(min(m, key=lambda i: len(self.paths[i])))
+            self.select_files(files)
+            held = True
         if args.inspector:
             if self.res is None:
                 raise SystemExit("error: --inspector needs resolve.npz; run atlas_resolve.py first")
@@ -2094,6 +2291,17 @@ class Viewer:
             snap("3d_zoom.png")
             self.set_proj("2d")
             self.set_metric("tokens")
+        if self.has_layers and self.res is not None:
+            self.set_lens("layers")
+            self.fit()
+            snap("layers.png")
+            top = int(np.argmax(self.res["file_refs_in"]))
+            self.select_files([top])
+            self.fit()
+            snap("selection.png")
+            self.clear_selection()
+            self.toggle_inspector(False)
+            self.set_lens("folders")
         if self.args.stats:
             self.print_stats()
 
@@ -2173,6 +2381,11 @@ def main():
                     help="start in 2D (default) or the tilted 3D projection; 3 toggles, Alt-drag tilts")
     ap.add_argument("--tilt", type=float, default=None, help="3D tilt in degrees (default 55)")
     ap.add_argument("--yaw", type=float, default=None, help="3D turn in degrees (default 0)")
+    ap.add_argument("--lens", default=None, choices=["folders", "layers"],
+                    help="start in the Folders treemap (default) or the Layers lens (needs the "
+                         "layers layout from atlas_layout.py, which needs resolve.npz)")
+    ap.add_argument("--select", default=None, metavar="PATH[,PATH...]",
+                    help="select these files and light their neighbourhood (for screenshots)")
     ap.add_argument("--metric", default=None, choices=METRIC_ORDER,
                     help="start with this metric's layout (default tokens); M cycles them")
     ap.add_argument("--inspector", action="store_true",

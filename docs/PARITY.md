@@ -28,12 +28,12 @@ The plan for reaching everything the video and the makepad commit messages show,
 | 20 | Search summary "D definitions · R references · F files · i/N" | done | |
 | 21 | Step to a result: van Wijk zoom-out-and-in, hit outlined and filled, row highlighted | done | |
 | 22 | Inspector tab: entity details on click, coverage statistics of the index | done | |
-| 23 | Click selects, Shift-click toggles, Shift-drag marquees, selection lights its neighbourhood | missing | 4 |
+| 23 | Click selects, Shift-click toggles, Shift-drag marquees, selection lights its neighbourhood | done (neighbourhood from the file graph, both directions; Inspector follows) | |
 | 24 | Toolbar: lens group, projection group, metric buttons (Tokens, References), palette, legend toggle | text buttons for lens, projection (2D, 3D) and metric, drawn over the map; no palette or legend | later (palette, legend) |
 | 25 | Area metric switchable: Tokens (default), References | done: Tokens, References, Lines, a hard cut between precomputed layouts | |
 | 26 | Size lens in 2D, 2.5D and 3D; hard lens switch | done: 2D and 3D, hard switch; 2.5D (perspective without heights) not separate | |
 | 27 | Alt-drag tilts; 3D extrudes files and directories by the height metric (References) with shaded walls in the hue; labels as billboards; the ladder still draws on slab tops | done (heights from whichever metric is selected; directories as depth terraces) | |
-| 28 | Layers lens: dependency ranks with SCC aggregates and rank labels | missing | 4 |
+| 28 | Layers lens: dependency ranks with SCC aggregates and rank labels | done (rank rows, cycles grouped, rank labels with file counts) | |
 | 29 | History lens: revision scrub rail, spatial diff, change lighting | missing | 5 |
 | 30 | Crumb trail follows the view centre | done | |
 | 31 | Two retained draw lists moved by the camera alone, no regeneration on pan or zoom | done (resident textures, per-run draws) | |
@@ -53,7 +53,7 @@ The plan for reaching everything the video and the makepad commit messages show,
 
 **Phase 3, 3D projection (done).** Rows 26 and 27. A perspective camera with tilt and orbit on Alt-drag, a per-file and per-directory height from the current metric, wall quads shaded in the hue, a depth buffer, labels as billboards, and the existing ladder drawn on the slab tops with the rung still chosen per file from its pixels per line (so text at the near edge, bars at the far edge, as in the video). Verify against frames 25 to 35 of the video.
 
-**Phase 4, Layers lens and selection (1 session).** Rows 23 and 28. The module graph from the resolver's `use` and `mod` edges, strongly connected components condensed, longest-path ranks as rows; click, Shift-click and marquee selection with the neighbourhood lit and the Inspector following.
+**Phase 4, Layers lens and selection (done).** Rows 23 and 28. The module graph from the resolver's `use` and `mod` edges, strongly connected components condensed, longest-path ranks as rows; click, Shift-click and marquee selection with the neighbourhood lit and the Inspector following.
 
 **Phase 5, History lens (1 session).** Row 29. `git log --numstat` per file for churn, a scrub rail that re-indexes at a chosen commit (4 s for all of makepad, so live enough), change lighting between two revisions, churn as a colour lens. This is also the recency heatmap from the lenses discussion.
 
