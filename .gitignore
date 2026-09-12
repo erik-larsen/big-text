@@ -2,6 +2,9 @@
 dobbie/warandpeace/glyphs.bmp
 dobbie/pdf/vertices.bmp
 
+# generated atlases (atlas_index.py, atlas_layout.py) and glyph data
+data/
+
 __pycache__/
 .venv/
 .DS_Store

@@ -19,6 +19,89 @@ The code atlas's own crates (code_graph, code_atlas, code_view) are in a private
 
 big-picture draws a gigapixel image with a fixed GPU budget by streaming tiles from a pyramid. Text breaks the pyramid: a downsampled page of code is grey mush, and a magnified tile is blurry. So big-text keeps the streaming and the camera but replaces the pyramid with a ladder of representations. Far away a file is a coloured tile. Closer it is one bar per line, coloured by token kind, which is what makes a codebase look like a die shot. Closer still it is real glyphs, drawn from a raster atlas while they are small and from bezier curves once they are large. Each file picks its rung from its size in pixels, and the viewer streams only the rungs it can see.
 
+## Build
+
+Python 3.12 with numpy, Pillow, PyOpenGL, glfw and fontTools (`pip install numpy Pillow PyOpenGL glfw fonttools`), an OpenGL 3.3 capable GPU, and a monospace font. On macOS the default is Menlo; on Linux pass `--font /usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf` to `atlas_viewer.py` and `atlas_layout.py`. The submodules are only needed as corpora: `git submodule update --init big-picture` is enough to try it, `makepad` adds 3.7 million lines.
+
+## Run
+
+Three steps: index a source tree, lay it out, view it. Everything generated lands under `data/`, which git ignores.
+
+```bash
+./atlas_index.py big-picture
+./atlas_layout.py data/big-picture_atlas
+./atlas_viewer.py data/big-picture_atlas
+```
+
+That is 19 files and 15,216 lines, indexed and laid out in well under a second. For something that looks like the video, index makepad's drawing and platform crates together, 493 files and 280,607 lines, or the whole makepad tree, 7,145 files and 3.67 million lines (4 seconds to index, 0.4 to lay out, 380 MB on the GPU):
+
+```bash
+./atlas_index.py makepad/draw makepad/platform --out data/makepad-draw_atlas
+./atlas_layout.py data/makepad-draw_atlas
+./atlas_viewer.py data/makepad-draw_atlas
+```
+
+`--vector-text` switches the glyphs above 40 device pixels per line to the Dobbie vector tier (crisp at any magnification; the first run builds the curve atlas in about two seconds). `--goto path:line`, `--zoom PX_PER_LINE`, `--filter WORD`, `--step K`, `--frames N --screenshot out.png`, `--shots DIR` and `--stats` script the viewer for screenshots and timing; `docs/shots/README.md` lists the commands that made the images below.
+
+## Controls
+
+| Input | Action |
+|---|---|
+| Wheel | Zoom about the cursor, with a short glide |
+| Left or right drag | Pan; the map follows the cursor |
+| Hover | Light fill on the file, a label with path, line and enclosing item |
+| `/` or click the box | Type a filter: every file with a hit gets a yellow border, the rest dim, the panel lists definitions then references |
+| `Enter` `]` `Down` / `[` `Up` | Fly to the next / previous result |
+| Click a result | Fly to it |
+| `R` | Refit the map |
+| `Escape` | Clear the filter, then the selection |
+
+## What it looks like
+
+The makepad drawing and platform crates fitted to the window. Every file is a rectangle wrapped into columns, and below one pixel per line the viewer draws one sampled bar per pixel row, which is what gives the circuit-board texture.
+
+![makepad-draw overview](docs/shots/makepad-draw/overview.png)
+
+The same corpus with the filter `Window`: 31 files outlined in yellow at the overview, the rest dimmed, the panel populated.
+
+![makepad-draw filter](docs/shots/makepad-draw/filter.png)
+
+big-picture's own source at the four rungs, from the fitted map through 2, 4.5 and 16 device pixels per line: bars, token blocks with item outlines, then text.
+
+![big-picture overview](docs/shots/big-picture/overview.png)
+![big-picture bars](docs/shots/big-picture/bars.png)
+![big-picture tokens](docs/shots/big-picture/tokens.png)
+![big-picture text](docs/shots/big-picture/text.png)
+
+Filter and fly-to on big-picture: the hit file outlined and the panel listing the definition, then the view after stepping to the first result.
+
+![big-picture filter](docs/shots/big-picture/filter.png)
+![big-picture result](docs/shots/big-picture/result.png)
+
+The two glyph tiers at 120 pixels per line: the 64 pixel raster atlas magnified (left) and the vector tier (right).
+
+![raster glyphs at 120 px](docs/shots/big-picture/text_120_raster.png)
+![vector glyphs at 120 px](docs/shots/big-picture/text_120_vector.png)
+
+## Implementation
+
+The contract that the code was built against is [docs/DESIGN.md](docs/DESIGN.md), including the deviations found while building. The short version:
+
+- **Index.** `atlas_index.py` walks the tree (honouring `.gitignore`, skipping binaries), expands tabs, maps every character to one column, and runs a small regex tokenizer per language family (Rust, C-like, Python, shell, plain) that assigns one of ten kinds to every character. Items (functions, structs, enums, impls, modules) come from regexes with brace or indentation matching. Output is a handful of numpy arrays: the characters, their kinds, line offsets, file ranges, item ranges.
+- **Layout.** `atlas_layout.py` is a squarified treemap over the directory tree with padding per level that the viewer draws as the directory band, so the bands widen as you zoom. Area is by non-space characters. Each file is wrapped into as many equal columns as keep about a 90th-percentile line width readable, at a pitch that fits its lines; lines longer than a column are clipped, not wrapped. A preview PNG and `tests/check_layout.py` check the invariants.
+- **The ladder.** Per frame the viewer computes device pixels per line for every file and picks a rung: under 1, sampled one-pixel bars; 1 to 3, one grey bar per line from indent to length; 3 to 6, one block per character in its kind colour, plus item outlines; 6 and up, glyphs. The switches are hard cuts, as in the video. Everything is resident: characters and kinds as 8-bit textures, lines and files as float and integer textures, one instanced quad per line drawn per run of visible files, the border ring drawn again after the text.
+- **Glyphs.** `atlas_font.py` rasterises the 95 printable ASCII glyphs of one monospace face into a mipmapped atlas that also draws the UI. `vt_glyphs.py` is the port of Dobbie's vector textures: quadratic outlines from fontTools, diced into a grid of curve lists, ray-cast per pixel in `shaders/vt_glyph.glsl`; its test measures a mean coverage error of 0.010 against Pillow at 96 pixels.
+- **Filter.** A whole-word regex over the corpus in a thread, chunked so the frame loop keeps running. Definitions are hits whose line matches a definition keyword for the language; there is no resolver, so a filter for `Window` in makepad finds 1 definition and 147 references where Rik's analyser finds 119 and 1472.
+- **Fly-to** is van Wijk and Nuij's smooth zoom-and-pan, which zooms out and back in between distant places.
+
+Measured on an M4 MacBook at a 2940 by 1658 framebuffer, `--frames 300 --stats` over the scripted zoom from fit to text: big-picture 1.2 ms mean and 3.4 ms 99th percentile; makepad-draw 1.6 and 4.4 ms; the full makepad tree 4.5 and 23.7 ms, the tail being the fitted view where all 3.67 million lines are visible, and 1.3 ms once zoomed to text.
+
+Not built: the resolver behind Rik's definitions and references, the 3D projection and tilt, lenses other than Folders, history, and a streaming working set (the whole corpus is resident, which is fine to a few million lines).
+
+## Decisions so far
+
+The six questions below were settled on 2026-09-12 for the first build, and the answers with the module contracts are in [docs/DESIGN.md](docs/DESIGN.md): a source tree as the corpus; a raster glyph atlas as the text rung with a Dobbie-style vector tier as an optional module; our own atlas generators with Pillow and fontTools; Python with OpenGL 3.3, GLES-compatible shaders, big-picture's conventions; no pyramid, the ladder is drawn from instance data; everything resident on the GPU, streaming later. Not built yet: the resolver, 3D and tilt, lenses other than Folders, History. The questions stay here because the answers are provisional.
+
 ## Questions to settle first
 
 1. Corpus and layout. Source trees, books, or whole filesystems? A source tree lays out like big-picture's photo mosaic: files are the pictures, directories the grouping, and a manifest gives hover and click. A book is 1273 pages in a grid. Both fit one layout stage if a "document" is just a rectangle with lines. A filesystem is the third shape: millions of nodes where most files have no text to show, so the ladder bottoms out at the treemap rung (makepad's mpfiles disk map does exactly this: pixel-bounded layout, siblings too small to see collapse into one block). dagcmp already scans and models such trees, and its compare statuses would colour a two-volume map the way token kinds colour code. Proposal: one layout stage where a document is a rectangle with lines, and a directory is a rectangle of documents; test with makepad's own repo (about 3 million lines), War and Peace, and a dagcmp scan of a full volume.
@@ -39,7 +122,17 @@ big-picture draws a gigapixel image with a fixed GPU budget by streaming tiles f
 ```
 big-text/
   README.md                    this file
-  notes/makepad-code-atlas.md  what the public makepad history says about the code atlas
+  docs/DESIGN.md               the build contract and its deviations
+  docs/shots/                  screenshots and the commands that made them
+  notes/makepad-code-atlas.md  what the public makepad history and the video say about the code atlas
+  atlas_index.py               source tree -> data/<name>_atlas/index.npz + index.json
+  atlas_layout.py              index -> layout.npz + layout.json (+ --preview PNG)
+  atlas_font.py                monospace font -> raster glyph atlas
+  atlas_viewer.py              the viewer
+  vt_glyphs.py                 the Dobbie vector-texture glyph tier
+  shaders/                     GLSL 330, one file per program
+  tests/                       layout invariants, viewer input, vector glyph accuracy, a synthetic atlas
+  data/                        generated atlases and glyph caches (gitignored)
   dobbie/                      the two live demos, verified against wdobbie.com
   big-picture/                 submodule, pinned
   dagcmp/                      submodule, pinned

@@ -44,7 +44,7 @@ Then open http://localhost:8000/warandpeace/ or http://localhost:8000/pdf/. Drag
 - War and Peace adds the small-text tier: at load, every glyph is drawn once through the vector shader into a framebuffer, which is mipmapped. In the fragment shader, when the glyph is minified past two texels per pixel, it samples that raster atlas with five taps instead of ray casting. This removed the shimmer of the first demo.
 - The whole book is pre-laid out: no text layout happens in the browser. A page is one draw call over a vertex range, and pages outside the view are skipped.
 
-What is not here: the C++ preprocessor that turned a PDF into atlas, vertex buffer and JSON. Dobbie describes it but did not release it. big-text needs its own.
+What is not here: the C++ preprocessor that turned a PDF into atlas, vertex buffer and JSON. Dobbie describes it but did not release it. big-text's own is `vt_glyphs.py` at the repo root, which builds the same kind of atlas from a font with fontTools, with the ray-cast ported to GLSL 330 in `shaders/vt_glyph.glsl`.
 
 ## Licence
 
