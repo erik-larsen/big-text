@@ -22,15 +22,15 @@ The plan for reaching everything the video and the makepad commit messages show,
 | 14 | Left or right drag pans | done | |
 | 15 | Hover: light fill on the file at every distance | done | |
 | 16 | Hover label: path, then line and enclosing item at the tokens rung and closer | done | |
-| 17 | Hover label at text rung: symbol with "N definitions · M references" | file hit count only | 1 |
+| 17 | Hover label at text rung: symbol with "N definitions · M references" | done | |
 | 18 | Filter box: typing outlines every hit file in yellow at any zoom, dims the rest | done | |
-| 19 | Results: Definitions with line, text and kind; References grouped by file with context | done, code-only hits; kinds are regex guesses | 1 (resolver) |
+| 19 | Results: Definitions with line, text and kind; References grouped by file with context | done: entities and resolved references from the resolver, statuses on the rest | |
 | 20 | Search summary "D definitions · R references · F files · i/N" | done | |
 | 21 | Step to a result: van Wijk zoom-out-and-in, hit outlined and filled, row highlighted | done | |
-| 22 | Inspector tab: entity details on click, coverage statistics of the index | missing | 1 |
+| 22 | Inspector tab: entity details on click, coverage statistics of the index | done | |
 | 23 | Click selects, Shift-click toggles, Shift-drag marquees, selection lights its neighbourhood | missing | 4 |
 | 24 | Toolbar: lens group, projection group, metric buttons (Tokens, References), palette, legend toggle | missing | 2 |
-| 25 | Area metric switchable: Tokens (default), References | tokens is the default; no references, no switch in the viewer | 1 then 2 |
+| 25 | Area metric switchable: Tokens (default), References | both metrics exist in atlas_layout.py; no switch in the viewer yet | 2 |
 | 26 | Size lens in 2D, 2.5D and 3D; hard lens switch | missing | 2, 3 |
 | 27 | Alt-drag tilts; 3D extrudes files and directories by the height metric (References) with shaded walls in the hue; labels as billboards; the ladder still draws on slab tops | missing | 3 |
 | 28 | Layers lens: dependency ranks with SCC aggregates and rank labels | missing | 4 |
@@ -47,7 +47,7 @@ The plan for reaching everything the video and the makepad commit messages show,
 
 **Phase 0, quick wins (half a session, done in commit after 41ed298).** Close rows 8 and the first half of 19 without new dependencies: a kind-bands rung that draws item rectangles filled at low alpha in their kind colour from 1 px per line (outlines take over from 3 px, which is the "fills far, outlines near" of the commit message); references exclude hits whose character kind is comment or string, using the kinds texture already built. Add a Tokens metric to atlas_layout.py (runs of non-space kinds) so the default area metric matches the video's. Verify: makepad-draw at 2 px per line shows coloured bands; the `Window` filter drops from 148 to 130 references.
 
-**Phase 1, resolver and Inspector (2 sessions).** Rows 17, 19, 22, 25. Parse with tree-sitter (one pip dependency plus the Rust, Python and C grammars); per file collect items with kinds and scopes, then resolve identifier uses: same scope, then the file, then `use` paths within the crate, then a unique global name; the rest are ambiguous or not found and counted as such. Output per-file definition and reference tables into the atlas and a per-file reference count (fan-in) as the References metric. The Inspector tab shows the selected or hovered entity with its definitions and references, and the index coverage (files, entities, references resolved, ambiguous, not found) in the style of Rik's panel. Parity means the same categories, not his numbers: his analyser is bigger and private. Verify: `Window` on makepad-draw lists the `pub type Window = XID` definition and code references only, grouped by file with kinds; hovering a symbol at text zoom shows its counts.
+**Phase 1, resolver and Inspector (done).** Rows 17, 19, 22, 25. Parse with tree-sitter (one pip dependency plus the Rust, Python and C grammars); per file collect items with kinds and scopes, then resolve identifier uses: same scope, then the file, then `use` paths within the crate, then a unique global name; the rest are ambiguous or not found and counted as such. Output per-file definition and reference tables into the atlas and a per-file reference count (fan-in) as the References metric. The Inspector tab shows the selected or hovered entity with its definitions and references, and the index coverage (files, entities, references resolved, ambiguous, not found) in the style of Rik's panel. Parity means the same categories, not his numbers: his analyser is bigger and private. Verify: `Window` on makepad-draw lists the `pub type Window = XID` definition and code references only, grouped by file with kinds; hovering a symbol at text zoom shows its counts.
 
 **Phase 2, metrics, lenses, wrapping (1 session).** Rows 3, 24, 25, 26 in 2D. A toolbar of text buttons; atlas_layout.py runs once per metric and the viewer swaps layouts with a hard cut; long lines wrap inside their column (the layout emits visual rows, the viewer maps hover back to logical lines). Verify: switching Tokens to References re-lays the map; a 200-column line reads as two rows at text zoom.
 

@@ -254,3 +254,47 @@ The build is done when, on `data/big-picture_atlas` and on `data/makepad-draw_at
 - Directory tags that would sit on an ancestor's tag slide right along the top edge past it, so nested directories read as a trail ("platform/ src/ os/ linux/"), and only wrap downwards when the edge runs out; single-child chains collapse into one tag as in the video.
 - The search runs over a newline-joined copy of the corpus (one byte per line extra) so word boundaries hold at line ends, in 1 MB chunks with pos/endpos so the boundary context is kept, yielding between chunks.
 - Results rows keep the file name of a long path (left-truncated) and window the line text around the hit column so the matched word is always visible.
+
+## Stage 6: atlas_resolve.py (phase 1)
+
+`./atlas_resolve.py data/<name>_atlas [--workers N]`
+
+Reads the atlas and the source files again, parses each with tree-sitter (Rust fully; Python and C with a smaller set of rules), and writes `resolve.npz` and `resolve.json` beside the index. The viewer works without them; with them the filter, the hover label and the Inspector use real entities instead of regexes. This is a lexical resolver in the sense of Rik's "lexical references recognised": names are resolved by scope, file, imports and uniqueness, with no type inference, and every reference gets a status saying how far that got.
+
+Entities (definitions), Rust: functions and methods, structs, fields, enums, variants, unions, traits, type aliases, consts, statics, modules, macro_rules, type parameters, function parameters and let bindings (locals). Each has a file, a file-relative line, a column and length (its name token), a kind, a name, and a scope: the enclosing entity (the impl or trait for a method, the function for a local, the struct for a field) or the file. Impl blocks are scopes, not entities. Python: functions, classes, parameters and assigned locals. C-like: functions, structs, enums, unions, typedefs, parameters, declarations.
+
+References: every identifier that is not a definition: values and calls, types, fields and methods after a dot, path segments (`a::b::C` resolves `C` through the path), macro invocations, `Self`, and the names inside `use` declarations. Identifiers in comments and strings never appear (tree-sitter does not produce them).
+
+Resolution, in order, stopping at the first that applies; the status names the step:
+
+| status | meaning |
+|---|---|
+| local | a parameter or let binding of the enclosing function |
+| file | an entity of a fitting kind in the same file (type contexts want types, value contexts want values) |
+| import | through the file's `use` map: `crate::`, `super::`, `self::` and workspace crate names resolve to a crate found by its Cargo.toml, then the name among that crate's entities |
+| crate | a unique entity of that name in the same crate |
+| global | a unique entity of that name in the whole corpus (Rik's "inferred") |
+| generic | a type parameter of an enclosing item |
+| self | `Self` in an impl whose type resolves |
+| method | a field or method name after a dot with more than one candidate in the corpus (Rik's "unknown method dispatch") |
+| ambiguous | several candidates and no rule to pick one |
+| external | the path root is a crate not in the corpus (std, core, alloc, a registry crate), or a Python builtin |
+| import missing | a `use` whose crate is in the corpus but whose name is not (Rik's "import not found") |
+| macro missing | `name!` with no macro_rules of that name (std macros are external) |
+| self unresolved | `Self` outside an impl, or in an impl whose type did not resolve |
+| not found | none of the above |
+
+Crates: the nearest ancestor directory with a Cargo.toml, named from its `[package]`; files under no Cargo.toml are unattached (Rik's count) and resolve without the import and crate steps.
+
+`resolve.npz`: `ent_file` uint32, `ent_line` uint32 (file-relative), `ent_col` uint16, `ent_len` uint16, `ent_kind` uint8, `ent_scope` int32 (entity index or -1); `ref_file`, `ref_line`, `ref_col`, `ref_len` likewise, `ref_ent` int32 (the entity, or -1), `ref_status` uint8 (the table above, in order from 0), `ref_name` uint32 (index into the names table); `file_refs_in` uint32 (references from other files to this file's entities, the References metric), `file_refs_out` uint32, `file_crate` int32.
+
+`resolve.json`: `names` (the string table, entity names by `ent_name` index and reference names), `ent_name` (uint32 list), `kinds` and `statuses` (name lists), `crates` [{name, dir}], `stats` (files parsed, unattached, entities, references, one count per status, seconds).
+
+Viewer with a resolve file present:
+
+- The filter matches entity names first: Definitions are the entities with that name (kind from the resolver), References are the references with that name, resolved ones first, each row tagged with its status when it is not resolved. A word that names no entity falls back to the regex search.
+- Hover at the text rung on an identifier shows the resolver's view: `struct Window · 1 definition · 129 references`, where the counts are the entities of that name and the references that resolve to them.
+- Click at the text rung selects the entity under the cursor (or the target of the reference under it) and opens the Inspector tab, which shows the entity's kind, name, path and line, its scope, and its references grouped by file; with nothing selected it shows the coverage block: files parsed and unattached, entities, references, and one line per status with its count, in the style of Rik's panel. `I` toggles the panel, `Tab` switches Inspector and Results.
+- `atlas_layout.py --metric references` uses `file_refs_in`.
+
+Acceptance: on makepad-draw, `Window` lists the `pub type Window = XID` definition with kind type and only code references; hovering `Window` in x11_sys.rs at text zoom shows its counts; the Inspector coverage block has every status with a non-zero total; `./atlas_resolve.py` on all of makepad finishes in a few minutes with `--workers 10`.

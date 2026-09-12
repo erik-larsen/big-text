@@ -182,6 +182,71 @@ def load_atlas(d):
     return a
 
 
+RESOLVED = {"local", "file", "import", "crate", "global", "generic", "self"}
+
+
+def load_resolve(d, atlas):
+    """resolve.npz/json from atlas_resolve.py, if present: entity and
+    reference tables, sorted per file for the hover lookup, plus counts."""
+    d = Path(d)
+    if not (d / "resolve.npz").exists():
+        return None
+    z = np.load(d / "resolve.npz")
+    r = {k: z[k] for k in z.files}
+    j = json.loads((d / "resolve.json").read_text())
+    r.update(names=j["names"], kinds=j["kinds"], statuses=j["statuses"],
+             crates=j["crates"], stats=j["stats"])
+    r["name_id"] = {n: i for i, n in enumerate(r["names"])}
+    r["resolved_status"] = np.array([st in RESOLVED for st in r["statuses"]])
+    line0 = atlas["file_line0"].astype(np.int64)
+    for kind in ("ent", "ref"):
+        f, ln, col = r[kind + "_file"].astype(np.int64), r[kind + "_line"].astype(np.int64), r[kind + "_col"].astype(np.int64)
+        order = np.lexsort((col, ln, f))
+        r[kind + "_order"] = order
+        r[kind + "_key"] = (f[order] << 40) | (ln[order] << 16) | col[order]
+        r[kind + "_gline"] = line0[f] + ln                    # global line per entry
+    ok = r["ref_ent"] >= 0
+    r["ent_refs"] = np.bincount(r["ref_ent"][ok], minlength=len(r["ent_file"]))
+    r["defs_by_name"] = np.bincount(r["ent_name"], minlength=len(r["names"]))
+    return r
+
+
+def symbol_at(res, f, j, col):
+    """('ent' or 'ref', index) of the identifier covering column col of
+    file-relative line j of file f, else None."""
+    for kind in ("ent", "ref"):
+        key, order = res[kind + "_key"], res[kind + "_order"]
+        k = (f << 40) | (j << 16)
+        lo, hi = np.searchsorted(key, k), np.searchsorted(key, k | 0xFFFF, side="right")
+        for i in order[lo:hi]:
+            c0, ln = int(res[kind + "_col"][i]), int(res[kind + "_len"][i])
+            if c0 <= col < c0 + ln:
+                return kind, int(i)
+    return None
+
+
+def symbol_search(atlas, res, word):
+    """Results for a word that names entities: the definitions (with their
+    kinds) and every reference of that name, tagged with its status when it
+    did not resolve. Same shape as run_search's result."""
+    nm = res["name_id"].get(word)
+    if nm is None:
+        return None
+    ents = np.flatnonzero(res["ent_name"] == nm)
+    ents = ents[~np.isin(res["ent_kind"][ents], [res["kinds"].index("local"), res["kinds"].index("param")])]
+    refs = np.flatnonzero(res["ref_name"] == nm)
+    if len(ents) == 0 and len(refs) == 0:
+        return None
+    file = np.concatenate((res["ent_file"][ents], res["ref_file"][refs])).astype(np.int64)
+    line = np.concatenate((res["ent_gline"][ents], res["ref_gline"][refs])).astype(np.int64)
+    col = np.concatenate((res["ent_col"][ents], res["ref_col"][refs])).astype(np.int64)
+    is_def = np.concatenate((np.ones(len(ents), bool), np.zeros(len(refs), bool)))
+    kinds = [res["kinds"][k] for k in res["ent_kind"][ents]]
+    kinds += ["" if res["resolved_status"][st] else res["statuses"][st] for st in res["ref_status"][refs]]
+    return {"file": file, "line": line, "col": col, "len": len(word), "is_def": is_def,
+            "kind": kinds, "word": word, "symbols": True}
+
+
 def def_regex(lang, word):
     kw = DEF_KW.get(lang, DEF_KW[None])
     return re.compile(rb"\b(" + kw + rb")\s+(?:<[^>]*>\s*)?" + re.escape(word) + rb"\b")
@@ -277,6 +342,7 @@ class Viewer:
         t0 = time.perf_counter()
         self.a = load_atlas(args.atlas)
         a = self.a
+        self.res = load_resolve(args.atlas, a)
         self.n_files = len(a["file_rect"])
         self.n_lines = len(a["line_pos"])
         self.n_dirs = len(a["dir_rect"])
@@ -336,6 +402,9 @@ class Viewer:
         self.current_file = -1
         self.result_i = -1
         self.panel_rows = []
+        self.result_rows = []
+        self.inspector_open = False
+        self.selected = None          # entity index in the resolver tables
         self.panel_scroll = 0
         self.panel_rect = None
         self.filter_rect = None
@@ -665,10 +734,23 @@ class Viewer:
             return
         if self.panel_rect and in_rect(sx, sy, self.panel_rect):
             row = self.panel_row_at(sy)
-            if row is not None and self.panel_rows[row][2] >= 0:
-                self.goto_result(self.panel_rows[row][2])
+            if row is not None:
+                act = self.panel_rows[row][2]
+                if isinstance(act, tuple):
+                    if act[0] == "tab":
+                        self.toggle_inspector()
+                    elif act[0] == "goto":
+                        self.fly_to(self.line_rect(act[1], act[2], act[3]))
+                elif act >= 0:
+                    self.goto_result(act)
             return
         self.filter_focus = False
+        # a click on an identifier at text zoom selects it in the Inspector
+        if self.res is not None and self.hover is not None and self.rung[self.hover[0]] == 3:
+            f, j, col = self.hover
+            sym = symbol_at(self.res, f, j, col) if j >= 0 else None
+            if sym is not None:
+                self.select_symbol(sym)
 
     def on_cursor(self, win, x, y):
         if self.scripted:             # real input must not disturb a scripted run
@@ -724,6 +806,10 @@ class Viewer:
             self.step(-1)
         elif key == glfw.KEY_R:
             self.fit()
+        elif key == glfw.KEY_I and self.res is not None:
+            self.toggle_inspector()
+        elif key == glfw.KEY_TAB and self.res is not None:
+            self.toggle_inspector()
         elif key == glfw.KEY_SLASH:
             self.filter_focus = True
             self.swallow_char = True
@@ -747,6 +833,11 @@ class Viewer:
         if len(text) < 2:
             self.set_results(None)
             return
+        if self.res is not None:
+            r = symbol_search(self.a, self.res, text)
+            if r is not None:
+                self.set_results(r)
+                return
         if sync:
             self.set_results(run_search(self.a, text))
             return
@@ -768,11 +859,12 @@ class Viewer:
         self.panel_scroll = 0
         self.hits_by_file[:] = False
         self.hit_count[:] = 0
-        self.panel_rows = []
+        self.result_rows = []
         if res is None or len(res["file"]) == 0:
             self.results = None if res is None else dict(res, order=np.zeros(0, np.int64))
             if self.results is not None:
-                self.panel_rows = [("no hits", UI_DIM, -1)]
+                self.result_rows = [("no hits", UI_DIM, -1)]
+            self.refresh_panel()
         else:
             # definitions first, then references, each by file then line
             key = np.lexsort((res["line"], res["file"], ~res["is_def"]))
@@ -823,17 +915,107 @@ class Viewer:
                 raw = self.line_text(line)
                 body = raw.lstrip()
                 c = col - (len(raw) - len(body))     # hit column in the stripped text
-                room = width - 6 - (len(kind) + 1 if is_def else 0)
+                room = width - 6 - (len(kind) + 1 if kind else 0)
                 if c + ln > room:                    # window the text so the hit shows
                     start = max(0, c - 8)
                     body = "…" + body[start:]
                 text = f"{j:>5} {body}"
-                if is_def:                   # kind tag at the right edge
+                if kind:                     # kind (or status) tag at the right edge
                     room = width - len(kind) - 1
                     text = text[:room - 1] + "…" if len(text) > room else text.ljust(room)
                     text += " " + kind
                 rows.append((text, UI_TEXT if is_def else UI_DIM, i))
+        self.result_rows = rows
+        self.refresh_panel()
+
+    # ---- inspector ---------------------------------------------------------
+    def refresh_panel(self):
+        """The right column shows the Results rows or the Inspector rows,
+        with a tab line on top when both exist. A row's third element is
+        a result index, -1 for none, or an action tuple."""
+        have_results = bool(self.result_rows)
+        rows = []
+        if self.inspector_open and self.res is not None:
+            if have_results:
+                rows.append(("[Inspector]  Results", YELLOW, ("tab",)))
+            rows += self.inspector_rows()
+        elif have_results:
+            if self.res is not None:
+                rows.append((" Inspector  [Results]", YELLOW, ("tab",)))
+            rows += self.result_rows
         self.panel_rows = rows
+
+    def inspector_rows(self):
+        res, width = self.res, self.panel_chars()
+        e = self.selected
+        if e is None:
+            st = res["stats"]
+            rows = [(f"Coverage · {st['crates']} crates", YELLOW, -1),
+                    (f"{'known':<18}{st['resolved']:>8}", UI_TEXT, -1),
+                    (f"{'entities':<18}{st['entities']:>8}", UI_TEXT, -1),
+                    (f"{'references':<18}{st['references']:>8}", UI_TEXT, -1)]
+            for name in res["statuses"]:
+                c = st["status"].get(name, 0)
+                if c:
+                    rows.append((f"  {name:<16}{c:>8}", UI_DIM, -1))
+            rows.append((f"{'files parsed':<18}{st['files']:>8}", UI_DIM, -1))
+            rows.append((f"{'unattached':<18}{st['unattached']:>8}", UI_DIM, -1))
+            rows.append((f"resolved in {st['seconds']} s", UI_DIM, -1))
+            rows.append(("", UI_DIM, -1))
+            rows.append(("click a symbol at text zoom to inspect it", UI_DIM, -1))
+            return rows
+        name = res["names"][res["ent_name"][e]]
+        kind = res["kinds"][res["ent_kind"][e]]
+        f, ln = int(res["ent_file"][e]), int(res["ent_line"][e])
+        rows = [(f"{kind} {name}", YELLOW, -1),
+                (self.short_path(self.paths[f], width - 6) + f":{ln + 1}", UI_TEXT, ("goto", f, int(res["ent_gline"][e]), int(res["ent_col"][e])))]
+        sc = int(res["ent_scope"][e])
+        if sc >= 0:
+            rows.append((f"in {res['kinds'][res['ent_kind'][sc]]} {res['names'][res['ent_name'][sc]]}", UI_DIM, -1))
+        d = int(res["defs_by_name"][res["ent_name"][e]])
+        refs = np.flatnonzero(res["ref_ent"] == e)
+        rows.append((f"{d} definition{'s' if d != 1 else ''} · {len(refs)} reference{'s' if len(refs) != 1 else ''}", UI_TEXT, -1))
+        if len(refs):
+            rows.append((f"References ({len(refs)})", YELLOW, -1))
+            order = np.lexsort((res["ref_line"][refs], res["ref_file"][refs]))
+            last = -1
+            for k in order[:400]:
+                r = refs[k]
+                rf, rl = int(res["ref_file"][r]), int(res["ref_gline"][r])
+                if rf != last:
+                    rows.append((self.short_path(self.paths[rf], width), UI_TEXT, -1))
+                    last = rf
+                body = self.line_text(rl).strip()
+                rows.append((f"{rl - int(self.a['file_line0'][rf]) + 1:>5} {body}", UI_DIM, ("goto", rf, rl, int(res["ref_col"][r]))))
+            if len(refs) > 400:
+                rows.append((f"… {len(refs) - 400} more", UI_DIM, -1))
+        return rows
+
+    def short_path(self, path, width):
+        return path if len(path) <= width else "…" + path[len(path) - width + 1:]
+
+    def select_symbol(self, sym):
+        """Select the entity of a symbol (a reference selects its target)."""
+        kind, i = sym
+        e = i if kind == "ent" else int(self.res["ref_ent"][i])
+        if e < 0:
+            return False
+        fitted = self.is_fitted()
+        self.selected = e
+        self.inspector_open = True
+        self.panel_scroll = 0
+        self.refresh_panel()
+        if fitted:
+            self.fit()
+        return True
+
+    def toggle_inspector(self, open_=None):
+        fitted = self.is_fitted()
+        self.inspector_open = (not self.inspector_open) if open_ is None else open_
+        self.panel_scroll = 0
+        self.refresh_panel()
+        if fitted:
+            self.fit()
 
     def update_file_flags(self):
         self.dimmed = np.zeros(self.n_files, bool)
@@ -966,9 +1148,27 @@ class Viewer:
             it = self.enclosing_item(f, j)
             if it is not None:
                 text += f" {self.item_keyword(it, f)} {self.item_names[it]}"
+        if self.rung[f] == 3 and self.res is not None and j >= 0:
+            sym = symbol_at(self.res, f, j, col)
+            if sym is not None:
+                text = f"{self.paths[f]}:{j + 1} " + self.symbol_text(sym)
+                return text
         if self.rung[f] == 3 and self.results is not None:
             text += f" · {int(self.hit_count[f])} hits"
         return text
+
+    def symbol_text(self, sym):
+        """'struct Window · 1 definition · 129 references', or the status of
+        an unresolved reference."""
+        res = self.res
+        kind, i = sym
+        e = i if kind == "ent" else int(res["ref_ent"][i])
+        if e < 0:
+            return f"{res['names'][res['ref_name'][i]]} · {res['statuses'][res['ref_status'][i]]}"
+        d = int(res["defs_by_name"][res["ent_name"][e]])
+        r = int(res["ent_refs"][e])
+        return (f"{res['kinds'][res['ent_kind'][e]]} {res['names'][res['ent_name'][e]]} · "
+                f"{d} definition{'s' if d != 1 else ''} · {r} reference{'s' if r != 1 else ''}")
 
     def build_dir_tags(self):
         """The tag each directory draws, or None. A directory whose inner
@@ -1307,7 +1507,7 @@ class Viewer:
             for k in range(top, min(len(self.panel_rows), top + n_vis)):
                 text, color, ri = self.panel_rows[k]
                 y = py0 + 4 * s + (k - top) * row_h
-                if ri >= 0 and ri == self.result_i:
+                if isinstance(ri, int) and ri >= 0 and ri == self.result_i:
                     box(self.panel_rect[0] + 2 * s, y, self.panel_rect[2] - 2 * s, y + row_h,
                         YELLOW, 0.25)
                 label(self.panel_rect[0] + pad, y + (row_h - small) / 2, text, small, color,
@@ -1402,6 +1602,29 @@ class Viewer:
             if self.results is None or len(self.results["order"]) == 0:
                 raise SystemExit("error: --step needs results; give --filter WORD with hits")
             self.goto_result((args.step - 1) % len(self.results["order"]), complete=True)
+            held = True
+        if args.inspector:
+            if self.res is None:
+                raise SystemExit("error: --inspector needs resolve.npz; run atlas_resolve.py first")
+            self.toggle_inspector(True)
+            held = True
+        if args.inspect:
+            if self.res is None:
+                raise SystemExit("error: --inspect needs resolve.npz; run atlas_resolve.py first")
+            nm = self.res["name_id"].get(args.inspect)
+            ents = np.flatnonzero(self.res["ent_name"] == nm) if nm is not None else []
+            if len(ents) == 0:
+                raise SystemExit(f"error: --inspect: no entity named '{args.inspect}'")
+            self.select_symbol(("ent", int(ents[0])))
+            held = True
+        if args.hover:
+            path, line, col = args.hover.rsplit(":", 2)
+            f = next(i for i, pth in enumerate(self.paths) if pth == path or pth.endswith("/" + path))
+            gl = int(self.a["file_line0"][f]) + int(line) - 1
+            self.fly_to(self.line_rect(f, gl, int(col) - 1, lines=30, cols=90), complete=True)
+            x, y = (float(v) for v in self.a["line_pos"][gl])
+            p = float(self.a["file_pitch"][f])
+            self.cursor_override = self.world_to_screen(x + (int(col) - 0.5) * p * self.A, y + p / 2)
             held = True
         return held
 
@@ -1538,6 +1761,12 @@ def main():
                     help="zoom so the file under the view centre has this many device px per line")
     ap.add_argument("--filter", default=None, metavar="WORD", help="apply a filter")
     ap.add_argument("--step", type=int, default=None, metavar="K", help="step to result K (1-based)")
+    ap.add_argument("--inspector", action="store_true",
+                    help="open the Inspector with nothing selected (the coverage block)")
+    ap.add_argument("--inspect", default=None, metavar="NAME",
+                    help="open the Inspector on the first entity of that name (needs resolve.npz)")
+    ap.add_argument("--hover", default=None, metavar="PATH:LINE:COL",
+                    help="fly there and hold the cursor on that cell (for screenshots)")
     ap.add_argument("--shots", default=None, metavar="DIR",
                     help="write the standard screenshot set to DIR and exit")
     ap.add_argument("--stats", action="store_true",

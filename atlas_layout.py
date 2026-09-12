@@ -12,6 +12,7 @@ holds the file's typical line length; lines longer than a column are clipped.
   ./atlas_layout.py data/big-picture_atlas --preview docs/shots/big-picture_layout.png
 """
 import argparse
+from pathlib import Path
 import json
 import math
 import os
@@ -311,8 +312,10 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("atlas", metavar="ATLAS_DIR", help="data/<name>_atlas with index.npz + index.json")
     ap.add_argument("--aspect", default="16:9", help="world aspect W:H (default 16:9)")
-    ap.add_argument("--metric", choices=["tokens", "chars", "lines", "bytes"], default="tokens",
-                    help="file size metric for the treemap (default tokens)")
+    ap.add_argument("--metric", choices=["tokens", "references", "chars", "lines", "bytes"],
+                    default="tokens",
+                    help="file size metric for the treemap (default tokens; references needs "
+                         "resolve.npz from atlas_resolve.py)")
     ap.add_argument("--char-aspect", type=float, default=None,
                     help="character advance / line pitch of the font (default: atlas_font.py's "
                          "metric for its default font, Menlo 0.569; 0.6 if that font is missing)")
@@ -337,6 +340,11 @@ def main():
     world = np.array([WORLD_W, WORLD_W / aspect])
     if args.metric == "tokens":
         metric = file_tokens(z["kinds"], z["line_off"], file_line0)
+    elif args.metric == "references":
+        rp = Path(args.atlas) / "resolve.npz"
+        if not rp.exists():
+            raise SystemExit(f"error: --metric references needs {rp}; run ./atlas_resolve.py {args.atlas}")
+        metric = np.load(rp)["file_refs_in"].astype(np.float64)
     elif args.metric == "chars":
         metric = z["file_chars"].astype(np.float64)
     elif args.metric == "lines":

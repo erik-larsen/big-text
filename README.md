@@ -21,14 +21,15 @@ big-picture draws a gigapixel image with a fixed GPU budget by streaming tiles f
 
 ## Build
 
-Python 3.12 with numpy, Pillow, PyOpenGL, glfw and fontTools (`pip install numpy Pillow PyOpenGL glfw fonttools`), an OpenGL 3.3 capable GPU, and a monospace font. On macOS the default is Menlo; on Linux pass `--font /usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf` to `atlas_viewer.py` and `atlas_layout.py`. The submodules are only needed as corpora: `git submodule update --init big-picture` is enough to try it, `makepad` adds 3.7 million lines.
+Python 3.12 with numpy, Pillow, PyOpenGL, glfw, fontTools and tree-sitter with its Rust, Python and C grammars (`pip install numpy Pillow PyOpenGL glfw fonttools tree-sitter tree-sitter-rust tree-sitter-python tree-sitter-c`), an OpenGL 3.3 capable GPU, and a monospace font. On macOS the default is Menlo; on Linux pass `--font /usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf` to `atlas_viewer.py` and `atlas_layout.py`. The submodules are only needed as corpora: `git submodule update --init big-picture` is enough to try it, `makepad` adds 3.7 million lines.
 
 ## Run
 
-Three steps: index a source tree, lay it out, view it. Everything generated lands under `data/`, which git ignores.
+Four steps: index a source tree, resolve its names, lay it out, view it. Everything generated lands under `data/`, which git ignores. The resolve step is optional; without it the filter is a plain word search and there is no Inspector.
 
 ```bash
 ./atlas_index.py big-picture
+./atlas_resolve.py data/big-picture_atlas
 ./atlas_layout.py data/big-picture_atlas
 ./atlas_viewer.py data/big-picture_atlas
 ```
@@ -37,6 +38,7 @@ That is 19 files and 15,216 lines, indexed and laid out in well under a second. 
 
 ```bash
 ./atlas_index.py makepad/draw makepad/platform --out data/makepad-draw_atlas
+./atlas_resolve.py data/makepad-draw_atlas
 ./atlas_layout.py data/makepad-draw_atlas
 ./atlas_viewer.py data/makepad-draw_atlas
 ```
@@ -53,6 +55,8 @@ That is 19 files and 15,216 lines, indexed and laid out in well under a second. 
 | `/` or click the box | Type a filter: every file with a hit gets a yellow border, the rest dim, the panel lists definitions then references |
 | `Enter` `]` `Down` / `[` `Up` | Fly to the next / previous result |
 | Click a result | Fly to it |
+| Click a symbol at text zoom | Select it in the Inspector: kind, definition, scope, every reference |
+| `I` / `Tab` | Open or close the Inspector / switch between Inspector and Results |
 | `R` | Refit the map |
 | `Escape` | Clear the filter, then the selection |
 
@@ -73,6 +77,11 @@ big-picture's own source at the four rungs, from the fitted map through 2, 4.5 a
 ![big-picture tokens](docs/shots/big-picture/tokens.png)
 ![big-picture text](docs/shots/big-picture/text.png)
 
+The resolver's view of makepad-draw: hovering `Window` in the x11 bindings, and the Inspector on the enum variant of the same name with its references grouped by file.
+
+![symbol hover](docs/shots/makepad-draw/hover_symbol.png)
+![inspector](docs/shots/makepad-draw/inspector.png)
+
 Filter and fly-to on big-picture: the hit file outlined and the panel listing the definition, then the view after stepping to the first result.
 
 ![big-picture filter](docs/shots/big-picture/filter.png)
@@ -91,12 +100,13 @@ The contract that the code was built against is [docs/DESIGN.md](docs/DESIGN.md)
 - **Layout.** `atlas_layout.py` is a squarified treemap over the directory tree with padding per level that the viewer draws as the directory band, so the bands widen as you zoom. Area is by tokens, as in the video's toolbar (characters, lines or bytes on request). Each file is wrapped into as many equal columns as keep about a 90th-percentile line width readable, at a pitch that fits its lines; lines longer than a column are clipped, not wrapped. A preview PNG and `tests/check_layout.py` check the invariants.
 - **The ladder.** Per frame the viewer computes device pixels per line for every file and picks a rung: under 1, sampled one-pixel bars; 1 to 3, one grey bar per line from indent to length; 3 to 6, one block per character in its kind colour, plus item outlines; 6 and up, glyphs. Below 3 px the items are also drawn as filled bands in their kind colour under the bars, Rik's kind-bands representation, and from 3 px the outlines take over. The switches are hard cuts, as in the video. Everything is resident: characters and kinds as 8-bit textures, lines and files as float and integer textures, one instanced quad per line drawn per run of visible files, the border ring drawn again after the text.
 - **Glyphs.** `atlas_font.py` rasterises the 95 printable ASCII glyphs of one monospace face into a mipmapped atlas that also draws the UI. `vt_glyphs.py` is the port of Dobbie's vector textures: quadratic outlines from fontTools, diced into a grid of curve lists, ray-cast per pixel in `shaders/vt_glyph.glsl`; its test measures a mean coverage error of 0.010 against Pillow at 96 pixels.
-- **Filter.** A whole-word regex over the corpus in a thread, chunked so the frame loop keeps running; mentions inside comments and strings are not hits. Definitions are hits whose line matches a definition keyword for the language; there is no resolver, so a filter for `Window` in makepad finds 1 definition and 129 references where Rik's analyser finds 119 and 1472.
+- **Resolver.** `atlas_resolve.py` parses every file with tree-sitter and collects entities (functions, methods, structs, fields, enums, variants, traits, type aliases, consts, statics, modules, macros, type parameters, parameters, locals) and every identifier use. Each use is resolved lexically, in order: the enclosing function's locals, the file, the file's `use` imports through the crate found by its Cargo.toml, a unique name in the crate, a unique name in the corpus, with type parameters, `Self`, enum paths and `Type::method` handled along the way; what is left is ambiguous, external (a crate not in the corpus), missing import, missing macro or not found, and the counts of each are the Inspector's coverage block. No type inference, so a method after a dot with several candidates is "method dispatch", the same category Rik's analyser reports. Rust is covered fully; Python and C get functions, types, parameters and locals. All of makepad resolves in 25 seconds on ten cores: 864k entities and 4.7 million references, 64 percent of them resolved, across 317 crates; Rik's Inspector reports 722k entities and 1.3 million edges for the same tree, so the scale matches even though the rules do not.
+- **Filter.** A word that names an entity lists its definitions with their kinds and every reference with its status; any other word is a whole-word regex over the corpus in a thread, chunked so the frame loop keeps running, with mentions inside comments and strings excluded. `Window` in makepad-draw finds 2 definitions (the x11 type alias and an enum variant) and 152 references, 91 of them resolved to one or the other; Rik's analyser reports 119 and 1472 for all of makepad.
 - **Fly-to** is van Wijk and Nuij's smooth zoom-and-pan, which zooms out and back in between distant places.
 
 Measured on an M4 MacBook at a 2940 by 1658 framebuffer, `--frames 300 --stats` over the scripted zoom from fit to text: big-picture 1.2 ms mean and 3.4 ms 99th percentile; makepad-draw 1.6 and 4.4 ms; the full makepad tree 4.5 and 23.7 ms, the tail being the fitted view where all 3.67 million lines are visible, and 1.3 ms once zoomed to text.
 
-Not built: the resolver behind Rik's definitions and references, the 3D projection and tilt, lenses other than Folders, history, and a streaming working set (the whole corpus is resident, which is fine to a few million lines).
+Not built: the 3D projection and tilt, lenses other than Folders, history, and a streaming working set (the whole corpus is resident, which is fine to a few million lines).
 
 ## Decisions so far
 
@@ -126,6 +136,7 @@ big-text/
   docs/shots/                  screenshots and the commands that made them
   notes/makepad-code-atlas.md  what the public makepad history and the video say about the code atlas
   atlas_index.py               source tree -> data/<name>_atlas/index.npz + index.json
+  atlas_resolve.py             tree-sitter entities and lexically resolved references -> resolve.npz + resolve.json
   atlas_layout.py              index -> layout.npz + layout.json (+ --preview PNG)
   atlas_font.py                monospace font -> raster glyph atlas
   atlas_viewer.py              the viewer
