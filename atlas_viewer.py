@@ -224,15 +224,18 @@ def run_search(atlas, word):
         time.sleep(0)
     off = np.array(starts, np.int64)
     line = np.searchsorted(line_off_nl, off, side="right") - 1
-    file = atlas["line_file"][line].astype(np.int64)
     col = off - line_off_nl[line]
     chars = atlas["chars"]
     line_off = atlas["line_off"].astype(np.int64)
-    is_def = np.zeros(len(off), bool)
-    kinds = [""] * len(off)
+    # a mention inside a comment or a string is not a reference
+    code = ~np.isin(atlas["kinds"][line_off[line] + col], (4, 5))
+    line, col = line[code], col[code]
+    file = atlas["line_file"][line].astype(np.int64)
+    is_def = np.zeros(len(line), bool)
+    kinds = [""] * len(line)
     files = atlas["index"]["files"]
     regs = {}
-    for i in range(len(off)):
+    for i in range(len(line)):
         lang = files[file[i]]["lang"]
         r = regs.get(lang)
         if r is None:
@@ -1110,6 +1113,27 @@ class Viewer:
         inst[:, 8] = alpha
         return inst, n * cw
 
+    def band_instances(self):
+        """The kind bands: below 3 px per line the item rectangles of visible
+        files are filled bands in the item kind colour, under the sampled
+        bars and the line bars alike so nothing flips at the 1 px cut; from
+        3 px the outlines take over (fills far, outlines near)."""
+        a = self.a
+        m = (self.visible & (self.rung <= 1))[self.item_rect_file]
+        if not m.any():
+            return np.zeros((0, 10), np.float32)
+        rects = a["item_rect"][m]
+        kinds = a["item_kind"][a["item_rect_item"][m]]
+        inst = np.zeros((len(rects), 10), np.float32)
+        inst[:, :4] = rects
+        for k, c in ITEM_COLORS.items():
+            inst[kinds == k, 4:7] = c
+        inst[(kinds < 1) | (kinds > 5), 4:7] = ITEM_COLORS[5]
+        inst[:, 7] = 1.0
+        inst[:, 8] = 0.0
+        inst[:, 9] = 0.18
+        return inst
+
     def item_instances(self):
         a = self.a
         m = (self.visible & (self.rung >= 2))[self.item_rect_file]
@@ -1321,6 +1345,7 @@ class Viewer:
         glUseProgram(self.prog["file"])
         glUniform1i(self.uniform("file", "uRingOnly"), 0)
         self.draw_instanced("file", self.n_files)
+        self.draw_rects(self.band_instances())      # kind bands under the bars
         self.draw_visible_lines()
         self.draw_rects(self.item_instances())
         self.draw_rects(self.hit_instances())

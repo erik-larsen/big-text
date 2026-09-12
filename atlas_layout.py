@@ -144,6 +144,20 @@ def file_columns(w, h, n, target, char_aspect):
     return chosen
 
 
+def file_tokens(kinds, line_off, file_line0):
+    """Tokens per file: runs of one non-space kind, restarted at every line
+    (lines are stored with no separator). The video's default area metric."""
+    kinds = kinds.astype(np.int16)
+    prev = np.concatenate(([0], kinds[:-1]))
+    start = (kinds != 0) & (prev != kinds)
+    lo = line_off[:-1].astype(np.int64)
+    lo = lo[lo < len(kinds)]
+    start[lo] |= kinds[lo] != 0
+    cum = np.concatenate(([0], np.cumsum(start)))
+    fo = line_off[file_line0].astype(np.int64)      # first byte of each file
+    return np.diff(cum[fo]).astype(np.float64)
+
+
 def layout_files(file_rect, file_line0, line_len, char_aspect):
     n_files = len(file_rect)
     pitch = np.zeros(n_files)
@@ -297,8 +311,8 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("atlas", metavar="ATLAS_DIR", help="data/<name>_atlas with index.npz + index.json")
     ap.add_argument("--aspect", default="16:9", help="world aspect W:H (default 16:9)")
-    ap.add_argument("--metric", choices=["chars", "lines", "bytes"], default="chars",
-                    help="file size metric for the treemap (default chars)")
+    ap.add_argument("--metric", choices=["tokens", "chars", "lines", "bytes"], default="tokens",
+                    help="file size metric for the treemap (default tokens)")
     ap.add_argument("--char-aspect", type=float, default=None,
                     help="character advance / line pitch of the font (default: atlas_font.py's "
                          "metric for its default font, Menlo 0.569; 0.6 if that font is missing)")
@@ -321,7 +335,9 @@ def main():
 
     aspect = parse_aspect(args.aspect)
     world = np.array([WORLD_W, WORLD_W / aspect])
-    if args.metric == "chars":
+    if args.metric == "tokens":
+        metric = file_tokens(z["kinds"], z["line_off"], file_line0)
+    elif args.metric == "chars":
         metric = z["file_chars"].astype(np.float64)
     elif args.metric == "lines":
         metric = np.diff(file_line0).astype(np.float64)

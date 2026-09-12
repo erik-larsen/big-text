@@ -13,7 +13,7 @@ The plan for reaching everything the video and the makepad commit messages show,
 | 5 | Directory bands widen with zoom | done | |
 | 6 | Single-child chains collapse into one tag ("git · tests") | done | |
 | 7 | Ladder rung: tile under about 1 px per line | done (sampled bars) | |
-| 8 | Ladder rung: kind bands, items as filled bands by kind at a distance ("fills far, outlines near") | missing: outlines only from 3 px | 0 |
+| 8 | Ladder rung: kind bands, items as filled bands by kind at a distance ("fills far, outlines near") | done (bands below 3 px, outlines above) | |
 | 9 | Ladder rung: grey line bars 1 to 3 px | done | |
 | 10 | Ladder rung: token-coloured segments with item outlines 3 to 6 px | done | |
 | 11 | Ladder rung: text from 6 px, hard cuts, per-file rung within one frame | done | |
@@ -24,13 +24,13 @@ The plan for reaching everything the video and the makepad commit messages show,
 | 16 | Hover label: path, then line and enclosing item at the tokens rung and closer | done | |
 | 17 | Hover label at text rung: symbol with "N definitions · M references" | file hit count only | 1 |
 | 18 | Filter box: typing outlines every hit file in yellow at any zoom, dims the rest | done | |
-| 19 | Results: Definitions with line, text and kind; References grouped by file with context | done, but 12 percent of "references" are comment or string mentions; kinds are regex guesses | 0 (exclude non-code hits), 1 (resolver) |
+| 19 | Results: Definitions with line, text and kind; References grouped by file with context | done, code-only hits; kinds are regex guesses | 1 (resolver) |
 | 20 | Search summary "D definitions · R references · F files · i/N" | done | |
 | 21 | Step to a result: van Wijk zoom-out-and-in, hit outlined and filled, row highlighted | done | |
 | 22 | Inspector tab: entity details on click, coverage statistics of the index | missing | 1 |
 | 23 | Click selects, Shift-click toggles, Shift-drag marquees, selection lights its neighbourhood | missing | 4 |
 | 24 | Toolbar: lens group, projection group, metric buttons (Tokens, References), palette, legend toggle | missing | 2 |
-| 25 | Area metric switchable: Tokens (default), References | chars, lines, bytes; no tokens, no references | 2 (tokens), 1 then 2 (references) |
+| 25 | Area metric switchable: Tokens (default), References | tokens is the default; no references, no switch in the viewer | 1 then 2 |
 | 26 | Size lens in 2D, 2.5D and 3D; hard lens switch | missing | 2, 3 |
 | 27 | Alt-drag tilts; 3D extrudes files and directories by the height metric (References) with shaded walls in the hue; labels as billboards; the ladder still draws on slab tops | missing | 3 |
 | 28 | Layers lens: dependency ranks with SCC aggregates and rank labels | missing | 4 |
@@ -45,7 +45,7 @@ The plan for reaching everything the video and the makepad commit messages show,
 
 ## Phases
 
-**Phase 0, quick wins (half a session).** Close rows 8 and the first half of 19 without new dependencies: a kind-bands rung that draws item rectangles filled at low alpha in their kind colour from 1 px per line (outlines take over from 3 px, which is the "fills far, outlines near" of the commit message); references exclude hits whose character kind is comment or string, using the kinds texture already built. Add a Tokens metric to atlas_layout.py (runs of non-space kinds) so the default area metric matches the video's. Verify: makepad-draw at 2 px per line shows coloured bands; the `Window` filter drops from 148 to 130 references.
+**Phase 0, quick wins (half a session, done in commit after 41ed298).** Close rows 8 and the first half of 19 without new dependencies: a kind-bands rung that draws item rectangles filled at low alpha in their kind colour from 1 px per line (outlines take over from 3 px, which is the "fills far, outlines near" of the commit message); references exclude hits whose character kind is comment or string, using the kinds texture already built. Add a Tokens metric to atlas_layout.py (runs of non-space kinds) so the default area metric matches the video's. Verify: makepad-draw at 2 px per line shows coloured bands; the `Window` filter drops from 148 to 130 references.
 
 **Phase 1, resolver and Inspector (2 sessions).** Rows 17, 19, 22, 25. Parse with tree-sitter (one pip dependency plus the Rust, Python and C grammars); per file collect items with kinds and scopes, then resolve identifier uses: same scope, then the file, then `use` paths within the crate, then a unique global name; the rest are ambiguous or not found and counted as such. Output per-file definition and reference tables into the atlas and a per-file reference count (fan-in) as the References metric. The Inspector tab shows the selected or hovered entity with its definitions and references, and the index coverage (files, entities, references resolved, ambiguous, not found) in the style of Rik's panel. Parity means the same categories, not his numbers: his analyser is bigger and private. Verify: `Window` on makepad-draw lists the `pub type Window = XID` definition and code references only, grouped by file with kinds; hovering a symbol at text zoom shows its counts.
 
