@@ -1,30 +1,31 @@
 # big-text
 
-big-text is the text-scale sibling of [big-picture](https://github.com/erik-larsen/big-picture): view millions of lines of source code, or a whole book, as one continuous surface. Zoom out and a codebase looks like a CPU die shot; zoom in and every glyph is crisp. No page turns, no mode switches, one camera.
+View millions of lines of source code, or a whole book, as one continuous surface. Zoom out and a codebase looks like a CPU die shot; zoom in and every glyph is crisp. No page turns, no mode switches, one camera, 2D or 3D views.
 
 ![big-text's own source in 3D](docs/shots/big-text/hero.png)
-
-*big-text viewing itself: 29 files and about 7,200 lines tilted into 3D with the heights and the tint on, the most edited files ember, every roof carrying its code.*
+*Code atlas viewer of this repo*
 
 ![War and Peace flyover: one flat sheet of pages, the near ones as text, the far rows as line bars, the Books as coloured bands](docs/shots/war-and-peace/hero.png)
+*Book viewer of Tolstoy's War and Peace*
 
-*The same viewer on War and Peace, Dobbie's example, in his colours and a book face: white pages on the blue-grey ground of his demo, Literata set by its own advances, 1,468 pages and 2.67 million glyphs as one grid in reading order, tilted, the near pages at the text LOD and the far rows at bars in the same frame.*
+This project keeps the camera, view culling, and zoom level of detail of [big-picture](https://github.com/erik-larsen/big-picture), though not its streaming nor tile image pyramid for lod.  Instead the entire data set is kept on the GPU, and the tiled image pyramid is replaced with this lod system:
 
-It shows three kinds of content, in this order of priority: text, images, 2D vector work. Each has an open-source lineage, and the levels of detail that tie them together have a fourth:
+1. Solid rectangles for code files and book pages when farthest away
+2. One bar per line of text when closer
+3. One rectangle per glyph, coloured by token, when closer still
+4. Real glyphs rendered from a raster atlas when even closer
+5. Real glyphs rendered from bezier curves when closest
 
-| Content | Lineage | Licence | What it contributes | Pinned as |
-|---|---|---|---|---|
-| Text | [Vector textures](https://wdobbie.com/post/gpu-text-rendering-with-vector-textures/) and [War and Peace](https://wdobbie.com/post/war-and-peace-and-webgl/) (Will Dobbie, 2016) | none published; reimplemented from the posts, no code or data used | The two-tier glyph design: outlines as quadratic bezier curves in a texture, ray-cast per pixel, crisp at any magnification; a mipmapped raster atlas below two texels per pixel; a whole book laid out once as one static vertex buffer | nothing to pin; the two posts are the reference |
-| Text | [Slug](https://github.com/EricLengyel/Slug) (Eric Lengyel, 2017; [paper](https://jcgt.org/published/0006/02/02/)) | MIT or Apache-2.0; the patent dedicated to the public domain on 2026-03-17 | The robust vector shader: curves listed per band instead of per grid cell, roots chosen from the signs of the control points so no crossing is counted twice or missed, a box filter along two axis rays | `slug/` at be3c13e; its pixel shader translated into `shaders/vt_glyph.glsl` with the notice kept |
-| Images | [big-picture](https://github.com/erik-larsen/big-picture) (Erik Larsen, 2026) | MIT | The camera and the budget: tile pyramid, virtual texturing, feedback pass, streaming under a fixed GPU footprint, mosaic layout from a folder tree | `big-picture/` |
-| 2D vectors | [HEPR](https://github.com/soadzoor/Highly-Efficient-PDF-Renderer) (soadzoor, 2026) | MIT | Analytic stroke and fill shaders for PDF paths with stroke level of detail, a PDF parser, a greek tier for sub-pixel glyphs, search and selection over pre-laid-out text, WebGL2 and WebGPU backends | `hepr/` at c81c326 (0.1.29) |
-| Levels of detail | [makepad](https://github.com/makepad/makepad) Studio code atlas (Rik Arends, 2026) | MIT (the repository's LICENSE, Makepad B.V.); its crates declare MIT OR Apache-2.0 | Semantic level of detail: file tile, kind bands, line bars, tokens, text, chosen by pixels per line; a retained GPU working set with a device-derived budget | not pinned; the levels of detail are reimplemented from the video and the public history |
+Each code file or book page picks its LOD from its line pitch in pixels, and within the text LOD each row picks its glyph tier; the viewer draws only what it can see.
 
-The three lineages with code are pinned as submodules at the commit studied, so what this README says about them can be checked against the code; the pins are references, not dependencies, and nothing is copied out of them except Slug's pixel shader. Dobbie never published a repository, so his posts are the reference. The code atlas's own crates live in a private makepad repository; big-text reimplements the levels of detail from the public engine, the commit messages and the video, and reimplements Dobbie's tiers from his posts. HEPR credits Dobbie and keeps his raster tier, but its glyph shader loops over every curve of a glyph, which is why Slug and not HEPR is the text lineage.
+| Content | Lineage | Licence | What it contributes |
+|---|---|---|---|
+| Text | [Slug](https://github.com/EricLengyel/Slug) (Eric Lengyel, 2017; [paper](https://jcgt.org/published/0006/02/02/)) | MIT or Apache-2.0; the patent dedicated to the public domain on 2026-03-17 | The robust vector shader: curves listed per band instead of per grid cell, roots chosen from the signs of the control points so no crossing is counted twice or missed, a box filter along two axis rays |
+| Text | [Vector textures](https://wdobbie.com/post/gpu-text-rendering-with-vector-textures/) and [War and Peace](https://wdobbie.com/post/war-and-peace-and-webgl/) (Will Dobbie, 2016) | none published; reimplemented from the posts, no code or data used | The two-tier glyph design: outlines as quadratic bezier curves in a texture, ray-cast per pixel, crisp at any magnification; a mipmapped raster atlas below two texels per pixel; a whole book laid out once as one static vertex buffer |
+| Levels of detail | [makepad](https://github.com/makepad/makepad) Studio code atlas (Rik Arends, 2026) | MIT (the repository's LICENSE, Makepad B.V.); its crates declare MIT OR Apache-2.0 | Semantic level of detail: file tile, kind bands, line bars, tokens, text, chosen by pixels per line; a retained GPU working set with a device-derived budget |
+| 2D vectors | [HEPR](https://github.com/soadzoor/Highly-Efficient-PDF-Renderer) (soadzoor, 2026) | MIT | Analytic stroke and fill shaders for PDF paths with stroke level of detail, a PDF parser, a greek tier for sub-pixel glyphs, search and selection over pre-laid-out text, WebGL2 and WebGPU backends |
+| Images | [big-picture](https://github.com/erik-larsen/big-picture) (Erik Larsen, 2026) | MIT | The camera and the budget: tile pyramid, virtual texturing, feedback pass, streaming under a fixed GPU footprint, mosaic layout from a folder tree |
 
-## The idea in one paragraph
-
-big-picture draws a gigapixel image with a fixed GPU budget by streaming tiles from a pyramid. Text breaks the pyramid: a downsampled page of code is grey mush, and a magnified tile is blurry. So big-text keeps the streaming and the camera but replaces the pyramid with levels of detail. Far away a file is a coloured tile. Closer it is one bar per line, coloured by token kind, which is what makes a codebase look like a die shot. Closer still it is real glyphs, drawn from a raster atlas while they are small and from bezier curves once they are large. Each file picks its LOD from its size in pixels, and the viewer streams only the LODs it can see.
 
 ## Vector text: Dobbie, Slug, and what big-text takes from each
 
