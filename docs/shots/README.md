@@ -6,7 +6,7 @@ Regenerate everything with:
 
 ```
 ./atlas_index.py . --out data/big-text_atlas
-./atlas_index.py makepad/draw makepad/platform --out data/makepad-draw_atlas
+./atlas_index.py ../makepad/draw ../makepad/platform --out data/makepad-draw_atlas
 ./atlas_resolve.py data/big-text_atlas
 ./atlas_resolve.py data/makepad-draw_atlas
 ./atlas_history.py data/big-text_atlas

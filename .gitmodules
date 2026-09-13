@@ -1,12 +1,6 @@
-[submodule "makepad"]
-	path = makepad
-	url = https://github.com/makepad/makepad.git
 [submodule "big-picture"]
 	path = big-picture
 	url = https://github.com/erik-larsen/big-picture.git
-[submodule "dagcmp"]
-	path = dagcmp
-	url = https://github.com/erik-larsen/dagcmp.git
 [submodule "hepr"]
 	path = hepr
 	url = https://github.com/soadzoor/Highly-Efficient-PDF-Renderer.git
