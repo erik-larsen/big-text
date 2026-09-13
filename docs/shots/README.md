@@ -1,6 +1,6 @@
 # Screenshots
 
-Acceptance evidence for the two reference corpora, produced by the viewer's `--shots` mode on the development machine (M4 MacBook, 1600 by 1000 point window, 2940 by 1658 device pixel framebuffer). The two `*_layout.png` files are `atlas_layout.py --preview` renders, everything else is a framebuffer grab from `atlas_viewer.py`.
+Acceptance evidence for the two reference corpora, produced by the viewer's `--shots` mode on the development machine (M4 MacBook, a 1470 by 820 point window sized to the screen's work area, 2940 by 1640 device pixel framebuffer, the same in every run). The two `*_layout.png` files are `atlas_layout.py --preview` renders, everything else is a framebuffer grab from `atlas_viewer.py`.
 
 Regenerate everything with:
 
@@ -9,6 +9,7 @@ Regenerate everything with:
 ./atlas_index.py makepad/draw makepad/platform --out data/makepad-draw_atlas
 ./atlas_resolve.py data/big-picture_atlas
 ./atlas_resolve.py data/makepad-draw_atlas
+./atlas_history.py data/big-picture_atlas
 ./atlas_history.py data/makepad-draw_atlas
 ./atlas_layout.py data/big-picture_atlas --preview docs/shots/big-picture_layout.png   # writes the tokens, references and lines layouts
 ./atlas_layout.py data/makepad-draw_atlas --preview docs/shots/makepad-draw_layout.png
@@ -63,7 +64,8 @@ Regenerate everything with:
 - `makepad-draw/churn.png`: the fitted map with the churn lens: every file's fill tinted ember by the log of its lines added and removed over the whole history; the linux and web platform code and the generated bindings are the hottest, the status line reads `churn · all history`.
 - `makepad-draw/age.png`: the age lens: fill by rank of the last commit, newest teal, the oldest untouched files dark; the status line names the newest commit's date.
 - `makepad-draw/changes.png`: the Changes lens between the commit 100 back (`1f6b12f`) and HEAD with the rail shown: added files green, changed files amber by the fraction of lines touched, the two revisions tagged on the rail, the status `changes · 1f6b12f → HEAD · 78 added · 203 changed · 0 removed`, equal to `git diff --name-status` for the two directories.
-- `makepad-draw/history.png`: the corpus loaded at `1f6b12f` (415 files, 221,045 lines), the rail tagging it, the status `at 1f6b12f 2026-07-30`, the toolbar reduced to what a past revision has.
+- `makepad-draw/history.png`: the corpus loaded at `1f6b12f` (415 files, 221,045 lines), the rail tagging it, the status `at 1f6b12f 2026-07-30`; its resolver and other layouts are read from the cache (a first load gets them in the background a second or two after the swap), so the toolbar has everything but the churn metric, which is HEAD's history.
+- `big-picture/churn.png`, `age.png`, `changes.png`, `history.png`: the same four for big-picture's own short history (`--shots` writes them for any atlas with `history.npz`).
 - `makepad-draw/history_file.png`: `vulkan.rs` selected with the Changes lens on: the Inspector's History block under the selection (commits, dates, lines, newest five commits) before the Uses and Used-by lists.
 - `makepad-draw/hover_symbol.png`: the cursor held on `Window` in x11_sys.rs at text zoom: the label reads the resolver's view, `type Window · 2 definitions · 102 references`.
 - `makepad-draw/result.png`: after stepping to result 1: the fly-to ends on `pub type Window = XID;` at 41 px per line with the hit box, the 3 px file border and the crumb trail `← makepad-draw › platform › src › os › linux › x11`.

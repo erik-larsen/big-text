@@ -68,6 +68,7 @@ def main():
     # click the tick of the revision 50 back: a thread indexes it, the map swaps
     back = min(50, n - 1)
     head_files = v.n_files
+    cached = (v.rev_dir(back) / "resolve.npz").exists()      # a second run finds stage two on disk
     ry = (v.rail_rect[1] + v.rail_rect[3]) / 2
     t0 = time.perf_counter()
     click(v, w, float(v.rail_xs[back]), ry)
@@ -76,10 +77,25 @@ def main():
         frames(v, 1)
     dt = time.perf_counter() - t0
     check(v.rev_i == back, f"revision {h['json']['revisions'][back]['short']} loaded in {dt:.1f} s")
-    check(v.res is None and v.metrics == ["tokens"], "a past revision has no resolver and only the tokens layout")
+    if cached:
+        check(v.res is not None and "references" in v.metrics, "a cached revision comes with its resolver and layouts")
+    else:
+        check(v.res is None and v.metrics == ["tokens"], "right after the swap: no resolver yet, only the tokens layout")
     check(len(v.paths) == v.n_files and v.file_u.shape[0] * v.file_u.shape[1] >= v.n_files,
           f"the corpus swapped: {v.n_files} files (HEAD has {head_files})")
     check((v.rev_dir(back) / "layout.npz").exists(), "the revision's atlas is cached on disk")
+    # stage two arrives in the background: the resolver and the other layouts,
+    # without moving the camera
+    cam = (v.cx, v.cy, v.zoom)
+    t0 = time.perf_counter()
+    while v.rev_enriching is not None and time.perf_counter() - t0 < 120:
+        frames(v, 1)
+    dt = time.perf_counter() - t0
+    check(v.rev_enriching is None and v.res is not None, f"the revision's resolver arrived in the background ({dt:.1f} s)")
+    check("references" in v.metrics and v.has_layers, f"and its layouts: {v.metrics}, layers {v.has_layers}")
+    check((v.cx, v.cy, v.zoom) == cam, "the camera did not move when the resolver arrived")
+    check((v.rev_dir(back) / "resolve.npz").exists() and (v.rev_dir(back) / "src").exists(),
+          "the cache holds the resolver output and the sources")
     frames(v, 3)
 
     # back to HEAD by clicking its tick

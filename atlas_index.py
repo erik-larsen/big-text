@@ -482,7 +482,7 @@ def walk_files(path):
 def discover(root, subdir, args, skipped):
     """Files to index under root/subdir, as paths relative to root."""
     full = os.path.join(root, subdir) if subdir else root
-    toplevel = git_toplevel(full)
+    toplevel = None if args.no_git else git_toplevel(full)
     rels = git_files(full) if toplevel else walk_files(full)
     result = []
     for rel in rels:
@@ -569,6 +569,9 @@ def main():
                     help="fnmatch patterns on the relative path or file name to skip")
     ap.add_argument("--submodules", action="store_true",
                     help="descend into git submodules and nested repos (default: skip them)")
+    ap.add_argument("--no-git", action="store_true",
+                    help="walk the tree instead of asking git which files it tracks (for a tree "
+                         "extracted under an ignored directory, such as a revision's cache)")
     args = ap.parse_args()
 
     srcs = [os.path.abspath(s) for s in args.src]

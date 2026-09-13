@@ -47,6 +47,7 @@ ZOOM_TAU = 0.12          # glide time constant, seconds
 ZOOM_TICK = math.log(1.2) / ZOOM_TAU    # one wheel unit ends up as x1.2
 ZOOM_VMAX = 12.0         # log-zoom per second at most
 PANEL_PT = 180           # results panel width in window points
+RAIL_PT = 22             # revision rail height in window points
 MARGIN_PT = 10           # UI margin in window points
 FLY_RHO = 1.4
 FOVY = 45.0              # 3D camera field of view, degrees
@@ -410,6 +411,7 @@ class Viewer:
         self.rev_i = 0                     # index into the revision table, 0 = newest = HEAD
         self.compare_i = None              # the second revision of the Changes lens
         self.rev_loading = None            # revision index while a thread indexes it
+        self.rev_enriching = None          # revision index while a thread resolves it
         self.rev_q = queue.Queue()
         self.color = getattr(args, "color", None) or "none"
         self.since_days = getattr(args, "since", None)
@@ -647,6 +649,8 @@ class Viewer:
             parts.append(f"indexing {self.hist['json']['revisions'][self.rev_loading]['short']}…")
         elif self.rev_i != 0:
             parts.append(f"at {self.rev_label(self.rev_i)}")
+        if self.rev_enriching is not None and self.rev_enriching == self.rev_i:
+            parts.append("resolving…")
         if self.color == "churn":
             parts.append("churn · " + (f"last {self.since_days} days" if self.since_days else "all history"))
         elif self.color == "age":
@@ -661,6 +665,20 @@ class Viewer:
                              f"{'HEAD' if new == 0 else self.hist['json']['revisions'][new]['short']} · "
                              f"{a} added · {c} changed · {r} removed")
         return " · ".join(parts)
+
+    def status_texts(self):
+        """(the corpus or search line, the lens and revision line or '')."""
+        status = f"{self.n_files} files · {self.n_lines} lines · {self.n_chars} chars"
+        if self.results is not None and len(self.filter_text) >= 2:
+            n = len(self.results["order"])
+            n_def = int(self.results["is_def"].sum())
+            status = (f"{n_def} definitions · {n - n_def} references · "
+                      f"{int(self.hits_by_file.sum())} files · {self.result_i + 1}/{n}")
+        extra = ""
+        if self.hist is not None and (self.color != "none" or self.rev_i != 0
+                                      or self.rev_loading is not None or self.rev_enriching is not None):
+            extra = self.lens_status()
+        return status, extra
 
     def rail_rev_at(self, sx):
         if not len(self.rail_xs):
@@ -688,9 +706,13 @@ class Viewer:
             self.swap_atlas(*self.head)
             return
         d = self.rev_dir(i)
-        if (d / "layout.npz").exists():
+        if (d / "layout.npz").exists():   # cached: swap now, complete it in the background if needed
             self.rev_i = i
-            self.swap_atlas(load_atlas(d, "tokens"), None)
+            a = load_atlas(d, "tokens")
+            self.swap_atlas(a, load_resolve(d, a))
+            if not (d / "layout_layers.npz").exists() and self.rev_enriching is None:
+                self.rev_enriching = i
+                threading.Thread(target=self.build_revision, args=(i, d, True), daemon=True).start()
             return
         self.rev_loading = i
         if sync:
@@ -699,50 +721,88 @@ class Viewer:
             return
         threading.Thread(target=self.build_revision, args=(i, d), daemon=True).start()
 
-    def build_revision(self, i, d):
-        """Thread body: git archive the revision into a temporary directory
-        outside this repository (so the indexer walks it rather than asking
-        git), index it into d, lay it out with the tokens metric."""
+    def build_revision(self, i, d, enrich_only=False):
+        """Thread body. Stage one: git archive the revision into d/src (kept,
+        so the resolver can read the sources later), index it with --no-git
+        (d is under the ignored data/ directory, where git lists nothing),
+        lay it out with the tokens metric, and hand the atlas over for the
+        swap. Stage two: resolve it and write the other layouts, and hand
+        over again so the metric buttons, the Layers lens and the entity
+        views come alive without moving the camera."""
         j = self.hist["json"]
         rev = j["revisions"][i]
         prefix = j["prefix"]
         specs = [prefix + s if s != "." else (prefix.rstrip("/") or ".") for s in j["pathspecs"]]
+        src = d / "src"
         try:
-            if not (d / "index.npz").exists():
-                tmp = Path(tempfile.mkdtemp(prefix="big-text-rev-"))
-                try:
+            if not enrich_only:
+                if not (d / "index.npz").exists() or not src.exists():
+                    shutil.rmtree(src, ignore_errors=True)
+                    src.mkdir(parents=True)
                     archive = subprocess.Popen(["git", "-C", j["toplevel"], "archive", rev["hash"], "--"] + specs,
                                                stdout=subprocess.PIPE)
-                    subprocess.run(["tar", "-x", "-C", str(tmp)], stdin=archive.stdout, check=True)
+                    subprocess.run(["tar", "-x", "-C", str(src)], stdin=archive.stdout, check=True)
                     archive.wait()
                     if archive.returncode:
                         raise RuntimeError(f"git archive exited {archive.returncode}")
-                    srcs = [str(tmp / s) if s != "." else str(tmp) for s in specs]
-                    d.mkdir(parents=True, exist_ok=True)
+                    srcs = [str(src / sp) if sp != "." else str(src) for sp in specs]
                     subprocess.run([sys.executable, str(HERE / "atlas_index.py"), *srcs, "--out", str(d),
-                                    "--name", self.name], check=True, capture_output=True, text=True)
-                finally:
-                    shutil.rmtree(tmp, ignore_errors=True)
-            subprocess.run([sys.executable, str(HERE / "atlas_layout.py"), str(d), "--metric", "tokens",
-                            "--lens", "folders"], check=True, capture_output=True, text=True)
-            self.rev_q.put((i, d, None))
+                                    "--name", self.name, "--no-git"], check=True, capture_output=True, text=True)
+                    for stale in d.glob("layout*.np*"):
+                        stale.unlink()
+                    for stale in d.glob("layout*.json"):
+                        stale.unlink()
+                    for stale in ("resolve.npz", "resolve.json"):
+                        (d / stale).unlink(missing_ok=True)
+                if not (d / "layout.npz").exists():
+                    subprocess.run([sys.executable, str(HERE / "atlas_layout.py"), str(d), "--metric", "tokens",
+                                    "--lens", "folders"], check=True, capture_output=True, text=True)
+                self.rev_q.put(("swap", i, d, None))
+            if not (d / "resolve.npz").exists():
+                subprocess.run([sys.executable, str(HERE / "atlas_resolve.py"), str(d)],
+                               check=True, capture_output=True, text=True)
+            if not (d / "layout_layers.npz").exists():
+                subprocess.run([sys.executable, str(HERE / "atlas_layout.py"), str(d)],
+                               check=True, capture_output=True, text=True)
+            self.rev_q.put(("enrich", i, d, None))
         except subprocess.CalledProcessError as e:
-            self.rev_q.put((i, d, (e.stderr or str(e)).strip()[-400:]))
+            self.rev_q.put(("fail", i, d, (e.stderr or str(e)).strip()[-400:]))
         except Exception as e:                      # noqa: BLE001
-            self.rev_q.put((i, d, str(e)))
+            self.rev_q.put(("fail", i, d, str(e)))
 
     def poll_revision(self):
         while True:
             try:
-                i, d, err = self.rev_q.get_nowait()
+                kind, i, d, err = self.rev_q.get_nowait()
             except queue.Empty:
                 return
-            self.rev_loading = None
-            if err:
+            if kind == "fail":
+                self.rev_loading = None
+                self.rev_enriching = None
                 print(f"revision {self.hist['json']['revisions'][i]['short']}: {err}", file=sys.stderr)
-                continue
-            self.rev_i = i
-            self.swap_atlas(load_atlas(d, "tokens"), None)
+            elif kind == "swap":
+                self.rev_loading = None
+                self.rev_enriching = i
+                self.rev_i = i
+                self.swap_atlas(load_atlas(d, "tokens"), None)
+            elif kind == "enrich":
+                self.rev_enriching = None
+                if self.rev_i == i:
+                    self.enrich_atlas(d)
+
+    def enrich_atlas(self, d):
+        """The loaded revision's resolver and other layouts are ready: take
+        them without touching the textures (the active layout's arrays are
+        the same), so the camera, hover and selection stay."""
+        a = self.a
+        a["layouts"] = load_layouts(d)
+        if a["metric"] in a["layouts"]:
+            a.update(a["layouts"][a["metric"]])
+        self.res = load_resolve(d, a)
+        self.metrics = [m for m in METRIC_ORDER if m in a["layouts"]]
+        self.has_layers = "layers" in a["layouts"]
+        self.update_neighbours()
+        self.refresh_panel()
 
     def history_rows(self):
         """The Inspector with nothing selected and a history: the loaded and
@@ -817,6 +877,17 @@ class Viewer:
             raise RuntimeError("window creation failed")
         glfw.make_context_current(self.win)
         glfw.swap_interval(0 if self.scripted else 1)
+        # a window the screen cannot hold is clamped by macOS to a height that
+        # varies by a point between runs (the reported work area itself
+        # jitters by a point); size it to the work area explicitly, rounded
+        # down to ten points with a little slack so the jitter cannot change
+        # it, so the framebuffer, and every screenshot, is the same every time
+        ax, ay, aw, ah = glfw.get_monitor_workarea(glfw.get_primary_monitor())
+        fl, ft, fr, fb = glfw.get_window_frame_size(self.win)
+        ww, wh = min(1600, aw - fl - fr), min(1000, (ah - ft - fb - 4) // 10 * 10)
+        if (ww, wh) != tuple(glfw.get_window_size(self.win)):
+            glfw.set_window_size(self.win, ww, wh)
+            glfw.set_window_pos(self.win, ax + fl, ay + ft)
         self.update_sizes()
         glfw.set_mouse_button_callback(self.win, self.on_mouse_button)
         glfw.set_cursor_pos_callback(self.win, self.on_cursor)
@@ -829,6 +900,21 @@ class Viewer:
         self.fb_w, self.fb_h = glfw.get_framebuffer_size(self.win)
         ww, wh = glfw.get_window_size(self.win)
         self.px = self.fb_w / ww if ww else 1.0      # device pixels per point
+        # the map's viewport is the window minus a top strip (the toolbar
+        # row, with the filter box while the panel is closed), a bottom strip
+        # (the crumb trail row, with the status while the panel is closed,
+        # plus the revision rail when shown) and the right column (map_w)
+        s = self.px
+        m, row = MARGIN_PT * s, 13 * s + 2 * 5 * s * 0.6      # a boxed row of 13 pt text
+        self.top_h = m + row + m
+        self.bottom_h = m + row + m
+        if self.rail_show and self.hist is not None:
+            self.bottom_h += RAIL_PT * s + m
+        self.map_y0 = self.top_h
+        self.map_h = max(1.0, self.fb_h - self.top_h - self.bottom_h)
+
+    def in_map(self, sx, sy):
+        return 0 <= sx < self.map_w and self.map_y0 <= sy < self.map_y0 + self.map_h
 
     def setup_gl(self):
         a = self.a
@@ -1073,7 +1159,7 @@ class Viewer:
         unit at the focus is still self.zoom device pixels."""
         if self.proj != "3d":
             x0, y0, _, _ = self.view2d()
-            sx, sy = 2.0 * self.zoom / self.map_w, 2.0 * self.zoom / self.fb_h
+            sx, sy = 2.0 * self.zoom / self.map_w, 2.0 * self.zoom / self.map_h
             M = np.array([[sx, 0, 0, -1 - x0 * sx],
                           [0, -sy, 0, 1 + y0 * sy],
                           [0, 0, 0, 0],
@@ -1082,7 +1168,7 @@ class Viewer:
         else:
             th, ph = math.radians(self.tilt), math.radians(self.yaw)
             tan_h = math.tan(math.radians(FOVY) / 2)
-            D = self.fb_h / (2.0 * self.zoom * tan_h)
+            D = self.map_h / (2.0 * self.zoom * tan_h)
             F = np.array([self.cx, self.cy, self.z_focus])
             eye = F + D * np.array([math.sin(th) * math.sin(ph), math.sin(th) * math.cos(ph), math.cos(th)])
             fwd = F - eye
@@ -1093,7 +1179,7 @@ class Viewer:
             V[0, :3], V[1, :3], V[2, :3] = right, up, -fwd
             V[:3, 3] = -V[:3, :3] @ eye
             near, far = max(D * 0.02, 0.05), D * 12 + 4000.0
-            aspect = self.map_w / self.fb_h
+            aspect = self.map_w / self.map_h
             P = np.zeros((4, 4))
             P[0, 0] = 1.0 / (tan_h * aspect)
             P[1, 1] = 1.0 / tan_h
@@ -1123,7 +1209,7 @@ class Viewer:
             glUniform1f(self.uniform(prog, "uFocusW"), self.focus_w)
             glUniform1f(self.uniform(prog, "uZScale"), self.z_scale())
             glUniform1i(self.uniform(prog, "uWorld"), 1)
-            glUniform2f(self.uniform(prog, "uViewport"), self.map_w, self.fb_h)
+            glUniform2f(self.uniform(prog, "uViewport"), self.map_w, self.map_h)
         else:
             glUniformMatrix4fv(loc, 1, GL_TRUE, np.eye(4, dtype=np.float32))
             glUniform1i(self.uniform(prog, "uWorld"), 0)
@@ -1132,7 +1218,7 @@ class Viewer:
     def unproject(self, sx, sy, wz=0.0):
         """World point on the plane z = wz under device pixel (sx, sy) in
         the 3D camera, or None if the ray does not hit it in front."""
-        nx, ny = sx / self.map_w * 2.0 - 1.0, 1.0 - sy / self.fb_h * 2.0
+        nx, ny = sx / self.map_w * 2.0 - 1.0, 1.0 - (sy - self.map_y0) / self.map_h * 2.0
         p0 = self.M_inv @ np.array([nx, ny, -1.0, 1.0])
         p1 = self.M_inv @ np.array([nx, ny, 1.0, 1.0])
         p0, p1 = p0[:3] / p0[3], p1[:3] / p1[3]
@@ -1147,7 +1233,7 @@ class Viewer:
     def project(self, wx, wy, wz=0.0):
         c = self.M @ np.array([wx, wy, wz, 1.0])
         w = c[3] if abs(c[3]) > 1e-9 else 1e-9
-        return ((c[0] / w + 1.0) * 0.5 * self.map_w, (1.0 - c[1] / w) * 0.5 * self.fb_h)
+        return ((c[0] / w + 1.0) * 0.5 * self.map_w, (1.0 - c[1] / w) * 0.5 * self.map_h + self.map_y0)
 
     # ---- camera ---------------------------------------------------------
     @property
@@ -1158,7 +1244,7 @@ class Viewer:
         return self.fb_w - column
 
     def view2d(self):
-        w, h = self.map_w / self.zoom, self.fb_h / self.zoom
+        w, h = self.map_w / self.zoom, self.map_h / self.zoom
         return (self.cx - w / 2, self.cy - h / 2, self.cx + w / 2, self.cy + h / 2)
 
     def view(self):
@@ -1170,7 +1256,8 @@ class Viewer:
         pts = []
         far = 3.0 * max(self.W, self.H)
         for wz in (0.0, self.z_focus, self.z_focus + H_MAX):
-            for sx, sy in ((0, 0), (self.map_w, 0), (0, self.fb_h), (self.map_w, self.fb_h)):
+            for sx, sy in ((0, self.map_y0), (self.map_w, self.map_y0),
+                           (0, self.map_y0 + self.map_h), (self.map_w, self.map_y0 + self.map_h)):
                 p = self.unproject(sx, sy, wz)
                 if p is None:
                     pts.append((self.cx - far, self.cy - far)); pts.append((self.cx + far, self.cy + far))
@@ -1180,7 +1267,7 @@ class Viewer:
         return (max(min(xs), -far), max(min(ys), -far), min(max(xs), self.W + far), min(max(ys), self.H + far))
 
     def fit_zoom(self):
-        return min(self.map_w * 0.94 / self.W, self.fb_h * 0.94 / self.H)
+        return min(self.map_w * 0.94 / self.W, self.map_h * 0.94 / self.H)
 
     def is_fitted(self):
         return (abs(self.zoom - self.fit_zoom()) < 1e-9 * self.zoom
@@ -1224,16 +1311,16 @@ class Viewer:
             p = self.unproject(sx, sy, self.z_focus if wz is None else wz)
             if p is None:                 # above the horizon: far along the view
                 return (self.cx + (sx - self.map_w / 2) * 50.0 / self.zoom,
-                        self.cy - 50.0 * self.fb_h / self.zoom)
+                        self.cy - 50.0 * self.map_h / self.zoom)
             return (float(p[0]), float(p[1]))
         return (self.cx + (sx - self.map_w / 2) / self.zoom,
-                self.cy + (sy - self.fb_h / 2) / self.zoom)
+                self.cy + (sy - self.map_y0 - self.map_h / 2) / self.zoom)
 
     def world_to_screen(self, wx, wy, wz=0.0):
         if self.proj == "3d":
             return self.project(wx, wy, wz)
         return ((wx - self.cx) * self.zoom + self.map_w / 2,
-                (wy - self.cy) * self.zoom + self.fb_h / 2)
+                (wy - self.cy) * self.zoom + self.map_y0 + self.map_h / 2)
 
     def zoom_about(self, sx, sy, factor):
         wx, wy = self.screen_to_world(sx, sy)
@@ -1255,7 +1342,7 @@ class Viewer:
             self.cy += wy - ny
             return
         self.cx = wx - (sx - self.map_w / 2) / z
-        self.cy = wy - (sy - self.fb_h / 2) / z
+        self.cy = wy - (sy - self.map_y0 - self.map_h / 2) / z
 
     def set_zoom_ppl(self, ppl, centre=None):
         """Zoom so the file under the view centre has ppl device pixels per line."""
@@ -1279,7 +1366,7 @@ class Viewer:
         """van Wijk & Nuij smooth zoom-and-pan to a view containing rect."""
         x0, y0, x1, y1 = rect
         rw, rh = (x1 - x0) * (1 + 2 * margin), (y1 - y0) * (1 + 2 * margin)
-        w1 = max(rw, rh * self.map_w / self.fb_h, 1e-6)
+        w1 = max(rw, rh * self.map_w / self.map_h, 1e-6)
         c1 = np.array([(x0 + x1) / 2, (y0 + y1) / 2])
         pitch = self.ref_pitch((c1[0], c1[1]))
         z1 = self.clamp_zoom(self.map_w / w1, pitch)
@@ -1344,8 +1431,9 @@ class Viewer:
             self.fly = None
             self.zoom_vel = 0.0
             self.tilting = bool(mods & glfw.MOD_ALT)
-            over_ui = any(rc and in_rect(sx, sy, rc) for rc in [self.panel_rect, self.filter_rect, self.rail_rect]
-                          + [r for r, _ in self.toolbar])
+            over_ui = not self.in_map(sx, sy) or any(
+                rc and in_rect(sx, sy, rc) for rc in [self.panel_rect, self.filter_rect, self.rail_rect]
+                + [r for r, _ in self.toolbar])
             if (mods & glfw.MOD_SHIFT) and button == glfw.MOUSE_BUTTON_LEFT and not over_ui:
                 self.marquee = [sx, sy, sx, sy]       # Shift-drag selects a rectangle
                 self.drag = None
@@ -1754,7 +1842,7 @@ class Viewer:
         clip = c @ self.M.T
         w = np.where(clip[:, :, 3] > 1e-6, clip[:, :, 3], np.nan)
         sx = (clip[:, :, 0] / w + 1) * 0.5 * self.map_w
-        sy = (1 - clip[:, :, 1] / w) * 0.5 * self.fb_h
+        sy = (1 - clip[:, :, 1] / w) * 0.5 * self.map_h + self.map_y0
         with np.errstate(invalid="ignore"):
             out = np.stack([np.nanmin(sx, 1), np.nanmin(sy, 1), np.nanmax(sx, 1), np.nanmax(sy, 1)], 1)
         out[np.isnan(out).any(axis=1)] = -1e9
@@ -1913,6 +2001,8 @@ class Viewer:
         return None
 
     def hover_at(self, sx, sy):
+        if not self.in_map(sx, sy):
+            return None
         wx, wy = self.screen_to_world(sx, sy)
         f = self.file_at(wx, wy)
         if self.proj == "3d":             # re-pick on that file's top, then its neighbour's
@@ -2318,7 +2408,7 @@ class Viewer:
             if bw > 0.4 * (r[d, 2] - r[d, 0]) * self.zoom:
                 continue
             sx, sy = self.world_to_screen(r[d, 0] + a["dir_pad"][d], r[d, 1] + a["dir_pad"][d], dtop[d])
-            if not (-bw <= sx <= self.map_w and -bh <= sy <= self.fb_h):
+            if not (-bw <= sx <= self.map_w and self.map_y0 - bh <= sy <= self.map_y0 + self.map_h):
                 continue
             # a child's corner is inset by its padding only, so its tag would
             # sit on the parent's: slide it right along the top edge, past
@@ -2334,11 +2424,13 @@ class Viewer:
                 sx = hit[2] + 2 * s
                 if sx + bw > right:
                     sx, sy = ox, sy + bh + 2 * s
+            else:
+                continue                   # still on another tag after eight slides: no tag
             placed.append((sx, sy, sx + bw, sy + bh))
             box(sx, sy, sx + bw, sy + bh, UI_BOX, 0.85)
             label(sx + pad, sy + pad * 0.6, text)
         glEnable(GL_SCISSOR_TEST)          # labels stay inside the map viewport
-        glScissor(0, 0, int(self.map_w), self.fb_h)
+        glScissor(0, int(self.fb_h - self.map_y0 - self.map_h), int(self.map_w), int(self.map_h))
         flush()                            # and go under the panels
         glDisable(GL_SCISSOR_TEST)
 
@@ -2371,10 +2463,26 @@ class Viewer:
             box(x0, y0, x1, y1, YELLOW, 0.12)
             box(x0, y0, x1, y1, YELLOW, 1.0, border=1.5 * s)
 
-        # crumb trail, bottom left
+        # the bottom strip: the crumb trail left and, while the panel is
+        # closed, the status right-aligned on the same row (the lens and
+        # revision in yellow before it), each cut to the room left
+        row_y = self.fb_h - m - size - 2 * pad * 0.6
         bw = len(self.crumb) * cw + 2 * pad
-        box(m, self.fb_h - m - size - 2 * pad * 0.6, m + bw, self.fb_h - m, UI_BOX, 0.85)
-        label(m + pad, self.fb_h - m - size - pad * 0.6, self.crumb)
+        box(m, row_y, m + bw, self.fb_h - m, UI_BOX, 0.85)
+        label(m + pad, row_y + pad * 0.6, self.crumb)
+        status, extra = self.status_texts()
+        if not self.panel_rows:
+            x1 = self.map_w - m
+            free = x1 - (m + bw + m)
+            for text, color in ((extra, YELLOW), (status, UI_TEXT)):
+                if not text or free < 6 * cw:
+                    continue
+                n_chars = min(len(text), int((free - 2 * pad) / cw))
+                tw = n_chars * cw + 2 * pad
+                box(x1 - tw, row_y, x1, self.fb_h - m, UI_BOX, 0.85)
+                label(x1 - tw + pad, row_y + pad * 0.6, text, color=color, max_chars=n_chars)
+                x1 -= tw + 2 * s
+                free -= tw + 2 * s
 
         # the revision rail above the crumb trail: time left to right, one
         # tick per commit, the loaded revision in yellow, the compare
@@ -2442,16 +2550,7 @@ class Viewer:
         # the filter box sit in the top right corner over the map.
         pw = PANEL_PT * s
         cx0, cx1 = self.fb_w - m - pw, self.fb_w - m
-        status = f"{self.n_files} files · {self.n_lines} lines · {self.n_chars} chars"
-        if self.results is not None and len(self.filter_text) >= 2:
-            n = len(self.results["order"])
-            n_def = int(self.results["is_def"].sum())
-            status = (f"{n_def} definitions · {n - n_def} references · "
-                      f"{int(self.hits_by_file.sum())} files · {self.result_i + 1}/{n}")
-        extra = ""                    # the lens and revision, on its own line over the map
-        if self.hist is not None and (self.color != "none" or self.rev_i != 0 or self.rev_loading is not None):
-            extra = self.lens_status()
-        if self.panel_rows:
+        if self.panel_rows:               # the column: status (wrapped), filter box, panel
             parts = wrap_parts(status + (" · " + extra if extra else ""), self.panel_chars())
             row_h = small + 2 * s
             sy1 = m + len(parts) * row_h + 2 * pad * 0.6
@@ -2459,16 +2558,8 @@ class Viewer:
             for k, part in enumerate(parts):
                 label(cx0 + pad, m + pad * 0.6 + k * row_h, part, small)
             fy0 = sy1 + m
-        else:
-            bw = len(status) * cw + 2 * pad
-            box(self.fb_w - m - bw, m, self.fb_w - m, m + size + 2 * pad * 0.6, UI_BOX, 0.85)
-            label(self.fb_w - m - bw + pad, m + pad * 0.6, status)
-            fy0 = m + size + 2 * pad * 0.6 + m
-            if extra:
-                bw = len(extra) * cw + 2 * pad
-                box(self.fb_w - m - bw, fy0, self.fb_w - m, fy0 + size + 2 * pad * 0.6, UI_BOX, 0.85)
-                label(self.fb_w - m - bw + pad, fy0 + pad * 0.6, extra, color=YELLOW)
-                fy0 += size + 2 * pad * 0.6 + m
+        else:                             # the filter box shares the top strip with the toolbar
+            fy0 = m
         fy1 = fy0 + size + 2 * pad * 0.6
         self.filter_rect = (cx0, fy0, cx1, fy1)
         box(*self.filter_rect, UI_BOX, 0.85)
@@ -2524,7 +2615,7 @@ class Viewer:
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         self.update_per_file()
         # the map in its own viewport, the window minus the panel column
-        glViewport(0, 0, int(self.map_w), self.fb_h)
+        glViewport(0, int(self.fb_h - self.map_y0 - self.map_h), int(self.map_w), int(self.map_h))
         for prog in ("dir", "file", "line", "wall"):
             self.set_camera_uniforms(prog)
         if self.proj == "3d":
@@ -2673,7 +2764,7 @@ class Viewer:
                 self.cx, self.cy = centre
                 self.zoom = z0 * (z1 / z0) ** u
                 self.z_focus = self.focus_target() if self.proj == "3d" else 0.0
-                self.cursor_override = (self.map_w / 2, self.fb_h / 2)
+                self.cursor_override = (self.map_w / 2, self.map_y0 + self.map_h / 2)
             now = time.perf_counter()
             self.frame(now - last)
             last = now
@@ -2707,7 +2798,7 @@ class Viewer:
         for name, ppl in (("bars.png", 2.0), ("tokens.png", 4.5), ("text.png", 16.0)):
             self.set_zoom_ppl(ppl, centre)
             snap(name)
-        self.cursor_override = (self.map_w / 2, self.fb_h / 2)
+        self.cursor_override = (self.map_w / 2, self.map_y0 + self.map_h / 2)
         snap("hover.png")
         self.cursor_override = None
         self.fit()
