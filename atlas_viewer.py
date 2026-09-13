@@ -1666,6 +1666,22 @@ class Viewer:
         else:
             label(self.filter_rect[0] + pad, fy0 + pad * 0.6, "/ filter", color=UI_DIM)
 
+        # the top strip: the input hints, dim, top left, cut to the room
+        # before the filter box; only the keys this corpus answers to
+        hints = ["wheel zoom", "drag pan", "/ filter", "Enter next hit", "3 tilt", "Alt-drag turn"]
+        if not a["layout"].get("flat", False):
+            hints.append("H heights")
+        if self.tint is not None:
+            hints.append(f"C {self.tint_label or 'tint'}")
+        hints += ["R refit", "Q quit"]
+        text = " · ".join(hints)
+        free = cx0 - m - m
+        n_chars = min(len(text), int((free - 2 * pad) / cw))
+        if n_chars >= 6:
+            tw = n_chars * cw + 2 * pad
+            box(m, m, m + tw, m + size + 2 * pad * 0.6, UI_BOX, 0.85)
+            label(m + pad, m + pad * 0.6, text, color=UI_DIM, max_chars=n_chars)
+
         # results panel down the rest of the column
         if self.panel_rows:
             py0, py1 = fy1 + m, self.fb_h - m

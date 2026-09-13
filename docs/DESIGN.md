@@ -87,7 +87,7 @@ A file's rectangle is split into k equal columns with a gap of 6 percent of the 
 
 ## Stage 3: the viewer
 
-`atlas_viewer.py data/<name>_atlas` opens a glfw window with an OpenGL 3.3 core context, sized to the screen's work area so the framebuffer is the same in every run (2940 by 1640 on the development machine); every pixel threshold below is in device pixels. The map's viewport is the window minus a top strip holding the filter box, a bottom strip holding the crumb trail and the status line, and the right column while the results panel is open; the map is drawn, fitted, hit-tested and scripted in that viewport, and a fitted map refits when the panel opens or closes.
+`atlas_viewer.py data/<name>_atlas` opens a glfw window with an OpenGL 3.3 core context, sized to the screen's work area so the framebuffer is the same in every run (2940 by 1640 on the development machine); every pixel threshold below is in device pixels. The map's viewport is the window minus a top strip holding the input hints (the keys this corpus answers to, dimmed) and the filter box, a bottom strip holding the crumb trail and the status line, and the right column while the results panel is open; the map is drawn, fitted, hit-tested and scripted in that viewport, and a fitted map refits when the panel opens or closes.
 
 ### Camera
 
