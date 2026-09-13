@@ -24,6 +24,8 @@ import numpy as np
 
 WORLD_W = 1600.0
 PAD_FRAC, PAD_MIN, PAD_MAX = 0.015, 0.05, 4.0
+PAD_LINES, PAD_MIN_LINES = 2.0, 0.01   # a treemap directory's padding: about two of its own lines
+AREA_PER_LINE = 34.0       # world area a line takes at pitch 1: p tall, about 60 characters of 0.57 p wide
 GAP = 0.06                 # column gap as a fraction of the column width
 MAX_COLS = 64
 TARGET_MIN, TARGET_MAX = 24, 100
@@ -92,13 +94,27 @@ def dir_padding(w, h):
     return min(pad, 0.25 * min(w, h))      # keep the inner rectangle real for slivers
 
 
-def layout_tree(dirs, file_weight, file_dir, world):
+def dir_padding_lines(w, h, lines):
+    """A treemap directory's padding: PAD_LINES pitches of its typical file,
+    the pitch estimated from its area over its lines, so the band is about
+    two lines thick at whatever zoom reads the directory's own text and a
+    hairline at the fit, instead of a fraction of the rectangle that grows
+    to hundreds of pixels once the text is legible."""
+    p = math.sqrt(max(w * h, 1e-9) / (AREA_PER_LINE * max(lines, 1)))
+    pad = min(max(PAD_LINES * p, PAD_MIN_LINES), PAD_MAX)
+    return min(pad, 0.25 * min(w, h))
+
+
+def layout_tree(dirs, file_weight, file_dir, world, file_lines):
     """Directory and file rectangles by recursive squarification."""
     n_dirs, n_files = len(dirs), len(file_weight)
     dir_weight = np.zeros(n_dirs)
+    dir_lines = np.zeros(n_dirs)
     for d in range(n_dirs - 1, -1, -1):      # pre-order: children come after parents
         dir_weight[d] = sum(file_weight[f] for f in dirs[d]["files"]) \
             + sum(dir_weight[c] for c in dirs[d]["children"])
+        dir_lines[d] = sum(file_lines[f] for f in dirs[d]["files"]) \
+            + sum(dir_lines[c] for c in dirs[d]["children"])
     dir_rect = np.zeros((n_dirs, 4))
     dir_pad = np.zeros(n_dirs)
     file_rect = np.zeros((n_files, 4))
@@ -106,7 +122,7 @@ def layout_tree(dirs, file_weight, file_dir, world):
     def place(d, rect):
         x0, y0, x1, y1 = rect
         dir_rect[d] = rect
-        pad = dir_padding(x1 - x0, y1 - y0)
+        pad = dir_padding_lines(x1 - x0, y1 - y0, dir_lines[d])
         dir_pad[d] = pad
         kids = [(file_weight[f], 0, f) for f in dirs[d]["files"]] \
             + [(dir_weight[c], 1, c) for c in dirs[d]["children"]]
@@ -445,7 +461,7 @@ def build_layout(args, z, meta, t0):
         page = (int(meta.get("page_lines", np.diff(file_line0).max())), int(np.percentile(line_len, 99.5)))
         dir_rect, dir_pad, file_rect, book_cols = book_layout(dirs, world, page[1] * args.char_aspect / (page[0] + 2))
     else:
-        dir_rect, dir_pad, file_rect = layout_tree(dirs, weight, file_dir, world)
+        dir_rect, dir_pad, file_rect = layout_tree(dirs, weight, file_dir, world, np.diff(file_line0))
     dir_depth = np.zeros(n_dirs, np.int64)
     for d in range(1, n_dirs):
         dir_depth[d] = dir_depth[dirs[d]["parent"]] + 1

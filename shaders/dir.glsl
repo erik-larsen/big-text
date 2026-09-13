@@ -3,7 +3,9 @@
 // (pad, depth, hue, 0), then (z base, height, 0, 0)). The fragment shader
 // draws the padding ring in the hue at 55 percent over a darker inner tint
 // (a solid terrace top in 3D); the ring is at least one device pixel wide
-// (fwidth gives world units per pixel). Positions go through uMVP, which is
+// and at most uBandPx (fwidth gives world units per pixel), so the band
+// stays thin at every zoom and the rest of the padding reads as the inner
+// tint. Positions go through uMVP, which is
 // orthographic in 2D and perspective in 3D; uZScale is 0 in 2D so every
 // height collapses onto the plane.
 #version 330 core
@@ -39,6 +41,7 @@ void main() {
 // ---- fragment ----
 #version 330 core
 uniform float uZScale;
+uniform float uBandPx;     // the band's greatest width in device pixels
 in vec2 vWorld;
 flat in vec4 vRect;
 flat in float vPad;
@@ -51,7 +54,7 @@ void main() {
     float d = min(min(vWorld.x - vRect.x, vRect.z - vWorld.x),
                   min(vWorld.y - vRect.y, vRect.w - vWorld.y));
     float px = fwidth(vWorld.x);           // world units per device pixel
-    float ring = max(vPad, px);            // never thinner than one pixel
+    float ring = min(max(vPad, px), uBandPx * px);   // one pixel at least, uBandPx at most
     if (d < ring) frag = vec4(vColor, uZScale > 0.0 ? 1.0 : 0.55);
     else          frag = uZScale > 0.0 ? vec4(mix(BG, vColor, 0.16), 1.0)
                                        : vec4(vColor * 0.6, 0.16);

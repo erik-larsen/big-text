@@ -16,7 +16,9 @@ optional tint per leaf with a one-word label; the layout gives it the
 rectangles, a weight per leaf and whether the sheet is flat.
 
 Controls: wheel = zoom about the cursor (with a glide) | drag = pan
-          hover = file / line / item label | R = refit | Q = quit
+          double-click = fly to the file or directory under the cursor,
+          again at its extents = fly back | hover = file / line / item label
+          R = reset the view | Q = quit
           / = focus the filter box, type to search, Backspace edits
           Enter, Down, ] = next hit | Up, [ = previous hit
           click a hit in the panel = fly there | Escape = clear the filter
@@ -50,6 +52,8 @@ ZOOM_TAU = 0.12          # glide time constant, seconds
 ZOOM_TICK = math.log(1.2) / ZOOM_TAU    # one wheel unit ends up as x1.2
 ZOOM_VMAX = 12.0         # log-zoom per second at most
 PANEL_PT = 180           # results panel width in window points
+BAND_PT = 3              # the directory band's greatest width in window points
+DBL_CLICK_S = 0.35       # two presses this close in time and place are a double click
 MARGIN_PT = 10           # UI margin in window points
 FLY_RHO = 1.4
 FOVY = 45.0              # 3D camera field of view, degrees
@@ -308,6 +312,8 @@ class Viewer:
         self.fly = None
         self.drag = None
         self.press = None
+        self.last_press = None        # (time, x, y) of the last left press, for double clicks
+        self.zoomed = None            # {"rect", "back": (cx, cy, zoom)} after a double click
         self.cursor = None            # device pixels, None when outside
         self.cursor_pt = None         # the same in window points
         self.cursor_override = None   # scripted hover position
@@ -418,10 +424,10 @@ class Viewer:
 
     def status_texts(self):
         """(the corpus or search line, the tint's label or '')."""
-        status = f"{self.n_files} files · {self.n_lines} lines · {self.n_chars} chars"
+        status = f"{self.n_files:,} files · {self.n_lines:,} lines · {self.n_chars:,} chars"
         if self.results is not None and len(self.filter_text) >= 2:
             n = len(self.results["order"])
-            status = f"{n} hits · {int(self.hits_by_file.sum())} files · {self.result_i + 1}/{n}"
+            status = f"{n:,} hits · {int(self.hits_by_file.sum()):,} files · {self.result_i + 1:,}/{n:,}"
         extra = self.tint_label if self.tint_on and self.tint_label else ""
         return status, extra
 
@@ -543,6 +549,9 @@ class Viewer:
             loc = glGetUniformLocation(p, "uVtMin")
             if loc >= 0:
                 glUniform1f(loc, VT_MIN_PPL)
+            loc = glGetUniformLocation(p, "uBandPx")
+            if loc >= 0:
+                glUniform1f(loc, BAND_PT * self.px)
         self.bind_textures()
 
     def z_scale(self):
@@ -853,15 +862,19 @@ class Viewer:
             self.zoom_vel = 0.0
         self.zoom_about(self.zoom_anchor[0], self.zoom_anchor[1], math.exp(dlog))
 
-    def fly_to(self, rect, margin=0.06, complete=False):
-        """van Wijk & Nuij smooth zoom-and-pan to a view containing rect."""
+    def fly_target(self, rect, margin=0.06):
+        """(centre, zoom, view width, pitch) of the view that holds rect with a margin."""
         x0, y0, x1, y1 = rect
         rw, rh = (x1 - x0) * (1 + 2 * margin), (y1 - y0) * (1 + 2 * margin)
         w1 = max(rw, rh * self.map_w / self.map_h, 1e-6)
         c1 = np.array([(x0 + x1) / 2, (y0 + y1) / 2])
         pitch = self.ref_pitch((c1[0], c1[1]))
         z1 = self.clamp_zoom(self.map_w / w1, pitch)
-        w1 = self.map_w / z1
+        return c1, z1, self.map_w / z1, pitch
+
+    def fly_to(self, rect, margin=0.06, complete=False):
+        """van Wijk & Nuij smooth zoom-and-pan to a view containing rect."""
+        c1, z1, w1, pitch = self.fly_target(rect, margin)
         self.zoom_vel = 0.0
         if complete:
             self.fly = None
@@ -925,15 +938,63 @@ class Viewer:
         if action == glfw.PRESS:
             self.fly = None
             self.zoom_vel = 0.0
+            now = time.perf_counter()
+            last, self.last_press = self.last_press, None
+            if (button == glfw.MOUSE_BUTTON_LEFT and last is not None and now - last[0] < DBL_CLICK_S
+                    and abs(x - last[1]) < 4 and abs(y - last[2]) < 4 and not self.over_ui(sx, sy)):
+                self.double_click(sx, sy)     # no drag, no click on the release
+                self.drag = self.press = None
+                return
+            if button == glfw.MOUSE_BUTTON_LEFT:
+                self.last_press = (now, x, y)
             self.tilting = bool(mods & glfw.MOD_ALT)
             self.drag = (x, y)
             self.press = (x, y)
         else:
-            moved = self.press is not None and (abs(x - self.press[0]) >= 3 or abs(y - self.press[1]) >= 3)
-            if not moved and button == glfw.MOUSE_BUTTON_LEFT:
-                self.click(sx, sy)
+            if self.press is not None:
+                moved = abs(x - self.press[0]) >= 3 or abs(y - self.press[1]) >= 3
+                if not moved and button == glfw.MOUSE_BUTTON_LEFT:
+                    self.click(sx, sy)
             self.drag = None
             self.press = None
+
+    def rect_at(self, sx, sy):
+        """The file under the cursor, else the deepest directory there: its
+        world rectangle, or None off the map."""
+        f = self.hover[0] if self.hover is not None else None
+        if f is None:
+            wx, wy = self.screen_to_world(sx, sy)
+            f = self.file_at(wx, wy)
+        if f is not None:
+            return tuple(float(v) for v in self.a["file_rect"][f])
+        wx, wy = self.screen_to_world(sx, sy)
+        r = self.a["dir_rect"]
+        inside = (r[:, 0] <= wx) & (wx < r[:, 2]) & (r[:, 1] <= wy) & (wy < r[:, 3]) & (self.a["dir_depth"] >= 1)
+        if not inside.any():
+            return None
+        d = int(np.flatnonzero(inside)[np.argmax(self.a["dir_depth"][inside])])
+        return tuple(float(v) for v in r[d])
+
+    def double_click(self, sx, sy):
+        """Fly to the extents of the file or directory under the cursor; a
+        second double click while still at those extents flies back to the
+        view before."""
+        rect = self.rect_at(sx, sy)
+        if rect is None:
+            return
+        z = self.zoomed
+        if z is not None and z["rect"] == rect:
+            c1, z1, _, _ = self.fly_target(rect)
+            at_extents = (abs(self.cx - c1[0]) < 1e-6 * self.W and abs(self.cy - c1[1]) < 1e-6 * self.H
+                          and abs(self.zoom - z1) < 1e-6 * z1)
+            if at_extents:
+                bx, by, bz = z["back"]
+                w, h = self.map_w / bz, self.map_h / bz
+                self.zoomed = None
+                self.fly_to((bx - w / 2, by - h / 2, bx + w / 2, by + h / 2), margin=0.0)
+                return
+        self.zoomed = {"rect": rect, "back": (self.cx, self.cy, self.zoom)}
+        self.fly_to(rect)
 
     def click(self, sx, sy):
         if self.filter_rect and in_rect(sx, sy, self.filter_rect):
@@ -1307,20 +1368,23 @@ class Viewer:
                 self.dir_tags[d] = f"{prefix} · {name}" if prefix else self.dir_labels[d]
 
     def update_crumb(self):
+        """Where the view centre is: the corpus, then the path of the file
+        under the centre, or of the deepest directory there."""
         a = self.a
-        r = a["dir_rect"]
-        side = np.minimum(r[:, 2] - r[:, 0], r[:, 3] - r[:, 1]) * self.zoom
-        inside = ((r[:, 0] <= self.cx) & (self.cx < r[:, 2]) & (r[:, 1] <= self.cy)
-                  & (self.cy < r[:, 3]) & (side >= 64))
-        if not inside.any():
-            self.crumb = f"← {self.name}"
-            return
-        d = int(np.flatnonzero(inside)[np.argmax(a["dir_depth"][inside])])
-        parts = []
-        while d > 0:
-            parts.append(self.dir_labels[d].rstrip("/"))
-            d = int(self.dir_parent[d])
-        self.crumb = "← " + " › ".join([self.name] + parts[::-1])
+        f = self.file_at(self.cx, self.cy)
+        if f is not None:
+            parts = self.paths[f].split("/")
+        else:
+            r = a["dir_rect"]
+            inside = (r[:, 0] <= self.cx) & (self.cx < r[:, 2]) & (r[:, 1] <= self.cy) & (self.cy < r[:, 3])
+            parts = []
+            if inside.any():
+                d = int(np.flatnonzero(inside)[np.argmax(a["dir_depth"][inside])])
+                while d > 0:
+                    parts.append(self.dir_labels[d].rstrip("/"))
+                    d = int(self.dir_parent[d])
+                parts.reverse()
+        self.crumb = "at " + " › ".join([self.name] + parts)
 
     # ---- frame ----------------------------------------------------------
     def project_rects(self, rects, z):
@@ -1344,6 +1408,21 @@ class Viewer:
         visible = np.where(front.all(axis=1), inside, front.any(axis=1))
         wc = np.maximum(w.mean(axis=1), 1e-6)
         return visible, self.focus_w / wc
+
+    def screen_box(self, rect, z=0.0):
+        """The device-pixel bounding box of a world rectangle at height z, or
+        None when a corner is behind the 3D camera."""
+        x0, y0, x1, y1 = (float(v) for v in rect)
+        if self.proj != "3d":
+            pts = [self.world_to_screen(x0, y0), self.world_to_screen(x1, y1)]
+        else:
+            pts = []
+            for wx, wy in ((x0, y0), (x1, y0), (x0, y1), (x1, y1)):
+                c = self.M @ np.array([wx, wy, z, 1.0])
+                if c[3] <= 1e-6:
+                    return None
+                pts.append(((c[0] / c[3] + 1.0) * 0.5 * self.map_w, (1.0 - c[1] / c[3]) * 0.5 * self.map_h + self.map_y0))
+        return (min(p[0] for p in pts), min(p[1] for p in pts), max(p[0] for p in pts), max(p[1] for p in pts))
 
     def focus_target(self):
         """The height the 3D camera should orbit: the top of the file under
@@ -1574,7 +1653,9 @@ class Viewer:
             boxes.clear()
             texts.clear()
 
-        # directory labels: tags at the padded top-left of visible directories
+        # directory labels: a tag at the top-left of the visible part of each
+        # directory's inner rectangle, so a directory zoomed into keeps its
+        # tag at the corner of the view
         r = a["dir_rect"]
         side = np.minimum(r[:, 2] - r[:, 0], r[:, 3] - r[:, 1]) * self.zoom * self.dir_scale
         x0, y0, x1, y1 = self.view()
@@ -1584,32 +1665,38 @@ class Viewer:
         dtop = (self.dir_z0 + self.dir_h) * zs
         placed = []
         bh = size + 2 * pad * 0.6
+        vx0, vy0 = 2 * s, self.map_y0 + 2 * s
+        vx1, vy1 = self.map_w - 2 * s, self.map_y0 + self.map_h - 2 * s
         for d in sorted(np.flatnonzero(vis), key=lambda d: a["dir_depth"][d]):
             text = self.dir_tags[d]
             if text is None:               # hidden by a label chain
                 continue
             bw = len(text) * cw + 2 * pad
-            if bw > 0.4 * (r[d, 2] - r[d, 0]) * self.zoom:
+            if bw > 0.4 * (r[d, 2] - r[d, 0]) * self.zoom * self.dir_scale[d]:
                 continue
-            sx, sy = self.world_to_screen(r[d, 0] + a["dir_pad"][d], r[d, 1] + a["dir_pad"][d], dtop[d])
-            if not (-bw <= sx <= self.map_w and self.map_y0 - bh <= sy <= self.map_y0 + self.map_h):
+            sb = self.screen_box(r[d] + a["dir_pad"][d] * np.array([1, 1, -1, -1]), dtop[d])
+            if sb is None:
+                continue
+            bx0, by0, bx1, by1 = max(sb[0], vx0), max(sb[1], vy0), min(sb[2], vx1), min(sb[3], vy1)
+            if bx1 - bx0 < bw or by1 - by0 < bh:
                 continue
             # a child's corner is inset by its padding only, so its tag would
             # sit on the parent's: slide it right along the top edge, past
             # the tag in the way (the tags then read as a trail, each on its
             # own directory's edge); down only if the right edge runs out
-            right = self.world_to_screen(r[d, 2] - a["dir_pad"][d], r[d, 1] + a["dir_pad"][d], dtop[d])[0]
-            ox = sx
+            sx, sy = bx0, by0
             for _ in range(8):
                 hit = next((b for b in placed
                             if sx < b[2] and sx + bw > b[0] and sy < b[3] and sy + bh > b[1]), None)
                 if hit is None:
                     break
                 sx = hit[2] + 2 * s
-                if sx + bw > right:
-                    sx, sy = ox, sy + bh + 2 * s
+                if sx + bw > bx1:
+                    sx, sy = bx0, sy + bh + 2 * s
             else:
                 continue                   # still on another tag after eight slides: no tag
+            if sy + bh > by1:
+                continue
             placed.append((sx, sy, sx + bw, sy + bh))
             box(sx, sy, sx + bw, sy + bh, UI_BOX, 0.85)
             label(sx + pad, sy + pad * 0.6, text)
@@ -1668,12 +1755,12 @@ class Viewer:
 
         # the top strip: the input hints, dim, top left, cut to the room
         # before the filter box; only the keys this corpus answers to
-        hints = ["wheel zoom", "drag pan", "/ filter", "Enter next hit", "3 tilt", "Alt-drag turn"]
+        hints = ["wheel zoom", "drag pan", "double-click fly", "/ filter", "Enter next hit", "3 tilt", "Alt-drag turn"]
         if not a["layout"].get("flat", False):
             hints.append("H heights")
         if self.tint is not None:
             hints.append(f"C {self.tint_label or 'tint'}")
-        hints += ["R refit", "Q quit"]
+        hints += ["R reset", "Q quit"]
         text = " · ".join(hints)
         free = cx0 - m - m
         n_chars = min(len(text), int((free - 2 * pad) / cw))

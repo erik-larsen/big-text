@@ -35,7 +35,7 @@ The line numbers in the `--goto` and `--hover` commands are the ones that held w
 
 - `overview.png`: the map fitted to the window.
 - `bars.png`, `tokens.png`, `text.png`: 2, 4.5 and 16 px per line about the corpus centre: the line-bars rung, the tokens rung with item outlines, the text rung.
-- `hover.png`: the text view with the cursor at the window centre: the hovered file's light fill and label.
+- `hover.png`: the text view with the cursor at the window centre: the hovered file's light border and label.
 - `filter.png`: the fitted map with the `--filter` word applied: every hit file outlined in yellow, the rest dimmed, the panel listing the hits by file, the status line counting them.
 - `result.png`: after stepping to the first hit: the fly-to landed at the text rung with the hit filled yellow, the file's 3 px border, the row highlighted in the panel.
 - `3d.png`, `3d_zoom.png`: the 3D projection with the heights on, at tilt 55 and yaw 12, fitted and at 3 px per line about the centre.

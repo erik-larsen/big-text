@@ -71,7 +71,7 @@ const vec3 HOVER  = vec3(0xdf, 0xe3, 0xec) / 255.0;
 const vec3 EMBER  = vec3(0xc8, 0x60, 0x40) / 255.0;
 
 void main() {
-    int rung = vRF.x, flags = vRF.y;
+    int flags = vRF.y;
     bool hovered = (flags & 1) != 0, hit = (flags & 2) != 0;
     bool current = (flags & 4) != 0, dimmed = (flags & 8) != 0;
     // every rung shares the file background: the hue lives in the directory
@@ -92,9 +92,5 @@ void main() {
         else if (hovered) col = mix(col, HOVER, 0.55);
         else col = mix(col, GREY, 0.7);
     }
-    // the light hover fill: the bright bar of the overview; lighter at the
-    // text rung so the glyphs drawn over it stay readable (the ring above
-    // keeps the full tint at every rung)
-    else if (hovered) col = mix(col, HOVER, rung == 3 ? 0.18 : 0.55);
     frag = vec4(col, 1.0);
 }

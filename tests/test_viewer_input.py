@@ -77,7 +77,7 @@ def main():
     frames(v, 2)
     lab = v.hover_label()
     check(lab is not None and ":" in lab, f"hover label at text rung: {lab!r}")
-    check("←" in v.crumb, f"crumb trail: {v.crumb!r}")
+    check(v.crumb.startswith("at ") and "›" in v.crumb, f"crumb trail: {v.crumb!r}")
 
     # filter: '/' focuses, typed chars search in a thread, results arrive
     v.fit()
@@ -137,9 +137,9 @@ def main():
     check(v.filter_text == "" and v.results is None and not v.dimmed.any(),
           "Escape clears the filter, the results and the dimming")
 
-    # R refits
+    # R resets the view
     v.on_key(w, glfw.KEY_R, 0, glfw.PRESS, 0)
-    check(abs(v.zoom - v.fit_zoom()) < 1e-12 and v.cx == v.W / 2, "R refits")
+    check(abs(v.zoom - v.fit_zoom()) < 1e-12 and v.cx == v.W / 2, "R resets the view")
 
     # --goto path:line lands on the line at the text rung
     path = v.paths[len(v.paths) // 2]
