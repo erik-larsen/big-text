@@ -118,6 +118,25 @@ def build_atlas(font_path=DEFAULT_FONT, index=0, cell=64, leading=1.0):
     return np.asarray(img, np.uint8).copy(), metrics
 
 
+def mean_ink(font_path, index=0, leading=1.0, freq=None):
+    """How dark the face's text is: the mean coverage of a glyph's advance
+    box, averaged over the ASCII glyphs weighted by `freq` (95 counts for
+    32..126, a corpus's letter frequencies; uniform when None), and the
+    fraction of characters that are spaces. A scheme's ink is derived from
+    these so bars and blocks carry the mean ink of the text they replace."""
+    atlas, m = build_atlas(font_path, index, 64, leading)
+    cw, ch, A = m["cell_w"], m["cell_h"], m["char_aspect"]
+    freq = np.ones(95) if freq is None else np.asarray(freq, np.float64)
+    cov = np.zeros(95)
+    for k in range(95):
+        x, y = (k % COLS) * cw, (k // COLS) * ch
+        w = max(int(round(cw * m["advances"][k] / A)), 1)     # the glyph's advance box inside the cell
+        cov[k] = atlas[y:y + ch, x:x + w].mean() / 255.0
+    ink = float((cov[1:] * freq[1:]).sum() / max(freq[1:].sum(), 1.0))
+    space = float(freq[0] / max(freq.sum(), 1.0))
+    return ink, space
+
+
 def glyph_cell(ch, metrics):
     """Atlas cell index for one character (UI text path)."""
     o = ord(ch)

@@ -43,20 +43,30 @@ from atlas_layout import font_advances, PAGE_MARGIN  # noqa: E402
 # the book's colours, Dobbie's: white pages on his demo's blue-grey ground
 # (its clearColor), black text, dark grey bars, the bands in the ground's
 # own colour so parts draw nothing; words and numbers alike. The face is
-# Literata, a book serif under the OFL, proportional: the layout and the
-# viewer take its advances from the face
-SCHEME = {"ground": "a0a9af", "page": "ffffff", "bar": "000000", "band": "a0a9af",
-          "font": "fonts/Literata-Regular.ttf",
-          # the line box stretched to a book's leading, and set type: lines
-          # flush to the margin by widening their word gaps
-          "leading": 1.3, "justify": True,
-          # ink: the alpha of the bars far and near, and of the word blocks,
-          # set to the text's own mean ink so nothing steps at a cut: Literata
-          # covers 15.6 percent of a glyph's box over the book's letters, bars
-          # and blocks stand 0.7 tall, and bars span the spaces (23 percent)
-          "ink": [0.17, 0.17, 0.22],
-          "kinds": ["000000", "141414", "141414", "141414", "141414", "6a6a6a", "141414", "4a4a4a", "141414", "141414"],
-          "items": ["7aa2f7", "e0c080", "d7a0a8", "5fb7b7", "8c909a"]}
+# Literata by default, a book serif under the OFL, proportional: the
+# layout and the viewer take its advances from the face, and everything
+# here that depends on the face is measured from it at index time
+DEFAULT_FONT = "fonts/Literata-Regular.ttf"
+DEFAULT_LEADING = 1.3      # the line box over the ink extents: a book's air between lines
+BAR_HEIGHT = 0.7           # bars and word blocks stand this much of a row tall (the shaders' barf)
+COLOURS = {"ground": "a0a9af", "page": "ffffff", "bar": "000000", "band": "a0a9af",
+           "kinds": ["000000", "141414", "141414", "141414", "141414", "6a6a6a", "141414", "4a4a4a", "141414", "141414"],
+           "items": ["7aa2f7", "e0c080", "d7a0a8", "5fb7b7", "8c909a"]}
+
+
+def scheme_for(font, leading, freq):
+    """The book's scheme for a face: the colours, the face and its leading,
+    set type, and an ink measured from the face over the book's own letter
+    frequencies, so the bars and the word blocks carry the mean ink of the
+    text they stand in for and nothing steps at a cut. The bars span the
+    spaces too, so theirs is scaled by the share of characters that are not."""
+    import atlas_font
+    ink, space = atlas_font.mean_ink(os.path.join(os.path.dirname(os.path.abspath(__file__)), font),
+                                     0, leading, freq)
+    bar, block = ink * (1 - space) / BAR_HEIGHT, ink / BAR_HEIGHT
+    return dict(COLOURS, font=font, leading=leading, justify=True,
+                ink=[round(bar, 3), round(bar, 3), round(block, 3)],
+                ink_measured={"glyph": round(ink, 4), "space": round(space, 4)})
 
 PART_RX = re.compile(r"^(?:(?:BOOK|PART|VOLUME)\s+[A-Z0-9]+\b|(?:FIRST|SECOND|THIRD)\s+EPILOGUE\b"
                      r"|EPILOGUE\b|PROLOGUE\b)(?P<rest>.*)$")
@@ -355,6 +365,11 @@ def main():
     ap.add_argument("--no-reflow", action="store_true",
                     help="keep Gutenberg's own line breaks instead of reflowing the prose to the page")
     ap.add_argument("--front", default="Front matter", help="label of the part before the first heading")
+    ap.add_argument("--font", default=DEFAULT_FONT,
+                    help="the book's face, a path under the repository (default the bundled Literata); the "
+                         "reflow, the footer, the headings and the ink are all measured from it")
+    ap.add_argument("--leading", type=float, default=DEFAULT_LEADING,
+                    help=f"the line box over the face's ink extents (default {DEFAULT_LEADING})")
     args = ap.parse_args()
     if args.gutenberg is not None:
         args.text = fetch(args.gutenberg, os.path.join("data", "gutenberg"))
@@ -378,7 +393,7 @@ def main():
     # Gutenberg writes honorifics lowercase before the name (`graf Leo Tolstoy`)
     author = " ".join(w for i, w in enumerate(author.split()) if not (w.islower() and i == 0))
     lines = body_lines(text)
-    measure = Measure(SCHEME["font"], SCHEME.get("leading", 1.0))
+    measure = Measure(args.font, args.leading)
     if not args.no_reflow:
         a, b = args.page_aspect.split(":")
         width = letter_width(args.page_lines, float(a) / float(b))
@@ -388,15 +403,20 @@ def main():
         width = page_width(parts, measure)
     dirs, files, file_dir, results = build(parts, args.page_lines, args.name, measure, width, author, book_title)
     skipped = {"binary": 0, "large": 0, "submodules": 0}
+    freq = np.zeros(128)
+    for r in results:
+        freq += np.bincount(np.frombuffer(r[4], np.uint8), minlength=128)[:128]
+    scheme = scheme_for(args.font, args.leading, freq[32:127])
     seconds = round(time.time() - t0, 2)
     stats = write_index(args.out, args.name, os.path.abspath(args.text), dirs, files, file_dir,
                         results, skipped, seconds,
                         extra={"corpus": "book", "page_lines": args.page_lines, "page_rows": args.page_lines + 3,
-                               "title": book_title, "author": author, "scheme": SCHEME})
+                               "title": book_title, "author": author, "scheme": scheme})
     n_chapters = sum(len(c) for _, c in parts)
     print(f"wrote {args.out}/index.npz + index.json: {len(parts)} parts, {n_chapters} chapters, "
           f"{stats['files']} pages, {stats['lines']} lines, {stats['chars'] / 1e6:.2f} M chars "
-          f"({sum(r[8] for r in results) / 1e6:.2f} M glyphs), {seconds}s")
+          f"({sum(r[8] for r in results) / 1e6:.2f} M glyphs), {seconds}s; {os.path.basename(args.font)} "
+          f"covers {scheme['ink_measured']['glyph']:.1%} of a glyph, ink {scheme['ink']}")
 
 
 if __name__ == "__main__":
