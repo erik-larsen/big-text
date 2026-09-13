@@ -1961,8 +1961,10 @@ class Viewer:
         return (xc - hw, yc - hh, xc + hw, yc + hh)
 
     def goto(self, spec, complete=True):
-        """--goto path[:line]"""
-        path, _, line = spec.partition(":")
+        """--goto path[:line]; the path may hold colons (a book's `Book One: 1805/...`)."""
+        path, sep, line = spec.rpartition(":")
+        if not sep or not line.isdigit():
+            path, line = spec, ""
         matches = [i for i, p in enumerate(self.paths)
                    if p == path or p.endswith("/" + path)]
         if not matches:

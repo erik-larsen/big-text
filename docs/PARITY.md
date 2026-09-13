@@ -59,6 +59,8 @@ The plan for reaching everything the video and the makepad commit messages show,
 
 **Phase 6, the vector tier rewrite (done).** Not a parity row: the copyright step. `shaders/vt_glyph.glsl` is a GLSL translation of Lengyel's MIT reference pixel shader and `vt_glyphs.py` builds its curve and band textures; the Dobbie port is gone from the tree; the `dobbie/` study directory was removed once nothing needed it, his posts being the reference; the default face is the bundled JetBrains Mono NL (OFL) with the line box defined as the ASCII ink extents so no proportion moved; `tests/bench_vt.py` measured the three tiers against exact coverage (README, Implementation): Slug halves the port's error and cuts sparkle by an order of magnitude at every size, costs a tenth more time, beats the raster tier's error down to 12 px per line, where the handoff now sits, and is on by default. The history was then rewritten to drop the port and the demo files before the repository went public.
 
+**The book adapter (done, 2026-09-13).** Not a parity row: the README's second corpus, Dobbie's own example. `book_index.py` turns a Project Gutenberg text into the stage 1 index (parts as directories, pages of 52 lines as files, chapters in the page paths, ASCII-normalised prose), `atlas_layout.py` lays a book out as bands of whole page rows in reading order instead of a treemap, and the viewer, filter and fly-to run unchanged (one `--goto` parser fix for colons in paths). War and Peace: 1,401 pages, 2.63 million glyphs, 65 pages across; the hero and the shots are in `docs/shots/war-and-peace/`. As-built notes in DESIGN.md.
+
 **Phase 7, scale (1 to 2 sessions).** Row 32. Per-file instance ranges with a byte budget, retirement of files off screen, so a corpus past ten million lines works. Only if a corpus that needs it exists.
 
 **Phase 8, optional (1 session each).** Rows 34 and 35: an MCP server that serves the index at the ladder's rungs under byte budgets; a filesystem indexer over a dagcmp scan.
@@ -71,9 +73,9 @@ The plan for reaching everything the video and the makepad commit messages show,
 - Lenses are precomputed layouts swapped with a hard cut, which is also what Rik settled on after removing his morph.
 - No parallel agents unless a phase has a separable module and the spend is agreed first.
 
-## Where things stand (2026-09-12, after phase 6)
+## Where things stand (2026-09-13, after phase 6 and the book adapter)
 
-Done: phases 0 to 6, rows 1 to 31 except the palette and legend buttons of row 24; 31 of the 36 rows are checked, and the vector tier is on Slug. Next: phase 7 (streaming) and 8 (MCP, disk mode). The history was rewritten on 2026-09-12 to drop the Dobbie files and the shader port before the repository went public. Not pursued: 120 Hz, 2.5D as a mode of its own.
+Done: phases 0 to 6, rows 1 to 31 except the palette and legend buttons of row 24; 31 of the 36 rows are checked, the vector tier is on Slug, and the book adapter (War and Peace) is built. Next: the photo corpus (the image payload over big-picture's pyramid, the real test of the adapter split), then phase 7 (streaming) and 8 (MCP, disk mode). The history was rewritten on 2026-09-12 to drop the Dobbie files and the shader port before the repository went public. Not pursued: 120 Hz, 2.5D as a mode of its own.
 
 To resume in a fresh clone (the generated data is not in git):
 
@@ -88,8 +90,10 @@ git submodule update --init makepad
 ./atlas_history.py data/makepad-draw_atlas
 ./atlas_layout.py data/big-text_atlas
 ./atlas_layout.py data/makepad-draw_atlas
+./book_index.py --gutenberg 2600 --out data/war-and-peace_atlas
+./atlas_layout.py data/war-and-peace_atlas
 ./tests/gen_synthetic_atlas.py
-./tests/check_layout.py data/makepad-draw_atlas && ./tests/test_viewer_input.py && ./tests/test_vt_glyphs.py && ./tests/test_history.py && ./tests/test_viewer_history.py
+./tests/check_layout.py data/makepad-draw_atlas && ./tests/check_layout.py data/war-and-peace_atlas && ./tests/test_viewer_input.py && ./tests/test_vt_glyphs.py && ./tests/test_history.py && ./tests/test_viewer_history.py
 ./atlas_viewer.py data/makepad-draw_atlas --shots /tmp/shots --filter Window --stats
 ```
 
@@ -97,4 +101,4 @@ Each phase so far: its contract was written into `docs/DESIGN.md` first ("as bui
 
 Known rough edges, none blocking (two older bugs fixed after the phase 6 demo, see DESIGN.md "Found in the phase 6 demo": the 3D item outlines painting triangles at close range, and the vector tier going blank under a colour lens): in 3D the fitted view is a fixed tilt and yaw (55, 12 in the shots); the Layers lens has no crossing minimisation within a row (no edges are drawn, so none would show; a follow-up for when they are); the resolver's `ambiguous` and `not found` counts are large because there is no type inference (by design); the vector glyph tier is on by default from a measured 12 px per line and costs about a tenth more than the port it replaced (`--no-vector-text` if that matters); a past revision has HEAD's history, so the churn metric layout is the one it lacks. Closed after phase 5 (see DESIGN.md, "Rough edges closed after phase 5"): the toolbar, filter box, status, crumb trail and rail now sit in top and bottom strips and the right column, with the map's viewport the rectangle between them, so the fitted map is clear of every control; the window is sized to the work area so the framebuffer is 2940 by 1640 in every run and screenshots are reproducible; directory tags that cannot find a free place are skipped rather than stacked; a loaded revision gets its resolver and other layouts in the background about two seconds after the swap, so its metric buttons, Layers lens and entity views come alive without a camera move.
 
-Phase 7 starts with a DESIGN.md contract for the streaming working set (row 32): per-file instance ranges under a byte budget and retirement of files off screen, only once a corpus that needs it exists.
+The next corpus is photos: a folder tree of images as the hierarchy, a mosaic as the layout, the average colour as the aggregate, big-picture's tile pyramid and virtual texturing as the leaf renderer; the first corpus whose leaf payload is not text, so the first that forces the adapter interface the README defers until three adapters exist. Phase 7 starts with a DESIGN.md contract for the streaming working set (row 32): per-file instance ranges under a byte budget and retirement of files off screen, only once a corpus that needs it exists.

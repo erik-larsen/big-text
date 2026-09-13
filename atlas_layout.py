@@ -132,6 +132,47 @@ def layout_tree(dirs, file_weight, file_dir, world):
     return dir_rect, dir_pad, file_rect
 
 
+# ---------------------------------------------------------------- book
+
+def book_layout(dirs, world, page_aspect):
+    """Rectangles for a book (index.json "corpus": "book", parts over
+    pages): every part a full-width band of whole page rows in reading
+    order, every page one cell of one size, rows filled left to right, the
+    last row of a part short. The column count is the one that brings a
+    cell closest to page_aspect (width over height) from the wide side, so
+    a page's single column holds its lines."""
+    n_dirs = len(dirs)
+    parts = dirs[0]["children"]
+    counts = [len(dirs[p]["files"]) for p in parts]
+    n_files = sum(len(d["files"]) for d in dirs)
+    dir_rect, dir_pad, file_rect = np.zeros((n_dirs, 4)), np.zeros(n_dirs), np.zeros((n_files, 4))
+    dir_rect[0] = (0.0, 0.0, world[0], world[1])
+    pad = dir_padding(world[0], world[1])
+    dir_pad[0] = pad
+    x0, y0, x1, y1 = pad, pad, world[0] - pad, world[1] - pad
+    best = None
+    for cols in range(1, max(counts, default=1) + 1):
+        rows = sum(-(-c // cols) for c in counts)
+        ratio = ((x1 - x0) / cols) / ((y1 - y0) / rows) / page_aspect
+        key = (ratio < 1, abs(math.log(ratio)))
+        if best is None or key < best[0]:
+            best = (key, cols, rows)
+    _, cols, rows = best
+    row_h = (y1 - y0) / rows
+    y = y0
+    for p, count in zip(parts, counts):
+        r = -(-count // cols)
+        dir_rect[p] = (x0, y, x1, y + r * row_h)
+        pp = dir_padding(x1 - x0, r * row_h)
+        dir_pad[p] = pp
+        cw, ch = (x1 - x0 - 2 * pp) / cols, (r * row_h - 2 * pp) / r
+        for k, f in enumerate(dirs[p]["files"]):
+            i, j = divmod(k, cols)
+            file_rect[f] = (x0 + pp + j * cw, y + pp + i * ch, x0 + pp + (j + 1) * cw, y + pp + (i + 1) * ch)
+        y += r * row_h
+    return dir_rect, dir_pad, file_rect, cols
+
+
 # ---------------------------------------------------------------- layers
 
 def file_graph(resolve_path, n_files):
@@ -302,11 +343,14 @@ def rows_per_line(line_len, capw):
     return 1 + (extra + (capw - HANG) - 1) // (capw - HANG)
 
 
-def layout_files(file_rect, file_line0, line_len, char_aspect):
+def layout_files(file_rect, file_line0, line_len, char_aspect, page=None):
     """Per file: pitch, columns, rows per column, characters per column,
     column width (with its gap). Long lines wrap inside their column, so the
     row count is found by iterating the pitch and the capacity to a fixed
-    point; columns narrower than WRAP_MIN characters clip instead."""
+    point; columns narrower than WRAP_MIN characters clip instead. For a
+    book `page` is (lines, width): every file is pitched as a full page and
+    aims at the book's line width, so a short last page keeps its chapter's
+    text size and no page splits into columns."""
     n_files = len(file_rect)
     pitch = np.zeros(n_files)
     cols = np.zeros(n_files, np.int64)
@@ -318,9 +362,12 @@ def layout_files(file_rect, file_line0, line_len, char_aspect):
         a, b = int(file_line0[f]), int(file_line0[f + 1])
         n = b - a
         lens = line_len[a:b]
-        target = int(np.percentile(lens, 90)) if n else TARGET_MIN
-        target = min(max(target, TARGET_MIN), TARGET_MAX)
-        k, r, p, cw, c = file_columns(x1 - x0, y1 - y0, n, target, char_aspect)
+        if page is None:
+            target = int(np.percentile(lens, 90)) if n else TARGET_MIN
+            target = min(max(target, TARGET_MIN), TARGET_MAX)
+            k, r, p, cw, c = file_columns(x1 - x0, y1 - y0, n, target, char_aspect)
+        else:
+            k, r, p, cw, c = file_columns(x1 - x0, y1 - y0, max(n, page[0]), page[1], char_aspect)
         c = min(c, CAP_MAX)
         if n and c >= WRAP_MIN and (lens > c).any():
             h = y1 - y0
@@ -542,12 +589,18 @@ def build_layout(args, z, meta, metric_name, metric, t0, lens="folders"):
     else:
         dir_hue = tree_hue
     n_dirs = len(dirs)
-    dir_rect, dir_pad, file_rect = layout_tree(dirs, weight, file_dir, world)
+    page, book_cols = None, 0
+    if meta.get("corpus") == "book":
+        # a page cell's aspect: the book's line width by its fullest page
+        page = (int(meta.get("page_lines", np.diff(file_line0).max())), int(np.percentile(line_len, 99.5)))
+        dir_rect, dir_pad, file_rect, book_cols = book_layout(dirs, world, page[1] * args.char_aspect / (page[0] + 2))
+    else:
+        dir_rect, dir_pad, file_rect = layout_tree(dirs, weight, file_dir, world)
     dir_depth = np.zeros(n_dirs, np.int64)
     for d in range(1, n_dirs):
         dir_depth[d] = dir_depth[dirs[d]["parent"]] + 1
 
-    pitch, cols, rows, cap, colw = layout_files(file_rect, file_line0, line_len, args.char_aspect)
+    pitch, cols, rows, cap, colw = layout_files(file_rect, file_line0, line_len, args.char_aspect, page)
     line_row0, row_line, row_col0, row_len, row_first = wrap_rows(file_line0, line_len, cap)
     file_row0 = line_row0[file_line0]
     row_pos = row_positions(file_rect, file_row0, pitch, rows, colw, row_first, args.char_aspect)
@@ -592,6 +645,7 @@ def build_layout(args, z, meta, metric_name, metric, t0, lens="folders"):
     print(f"{args.atlas} [{lens if lens != 'folders' else metric_name}]: {n_files} files, {n_dirs} dirs, "
           + (f"{lens_stats['layers']} layers, {lens_stats['cycles']} cycles of {lens_stats['in_cycles']} files, "
              f"{lens_stats['unconnected']} unconnected; " if lens_stats else "")
+          + (f"{book_cols} pages across, " if book_cols else "")
           + f"{n_lines} lines in "
           f"{n_rows} rows ({n_rows - n_lines} wrapped), {len(irect)} item rects; "
           f"world {world[0]:.0f}x{world[1]:.1f}, pitch {pitch.min():.4f}..{pitch.max():.3f} "
@@ -631,6 +685,8 @@ def main():
     with open(os.path.join(args.atlas, "index.json")) as f:
         meta = json.load(f)
     names = ["tokens", "references", "churn", "lines"] if args.metric == "all" else [args.metric]
+    if meta.get("corpus") == "book" and args.metric == "all":
+        names = ["tokens"]                # every page is one cell whatever the metric
     for name in names:
         metric = file_metric(name, z, meta["files"], z["file_line0"], args.atlas)
         if metric is None:

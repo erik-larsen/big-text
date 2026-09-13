@@ -151,6 +151,7 @@ SPECS = {
 _TEXT_STRING = rb"(?P<string>\"(?:[^\"\\\n]|\\.)*\")"
 _TEXT_TAIL = (rb"(?P<number>\b\d+(?:\.\d+)?\b)", rb"(?P<ident>" + _IDENT + rb")")
 SPECS["text"] = (_rx(_TEXT_STRING, *_TEXT_TAIL), set(), set(), False)
+SPECS["prose"] = (_rx(*_TEXT_TAIL), set(), set(), False)     # a book: words and numbers, no string literals
 SPECS["text-hash"] = (_rx(rb"(?P<comment>#[^\n]*)", _TEXT_STRING, *_TEXT_TAIL), set(), set(), False)
 SPECS["text-xml"] = (_rx(rb"(?P<comment><!--[\s\S]*?-->)", _TEXT_STRING, *_TEXT_TAIL), set(), set(), False)
 SPECS["text-css"] = (_rx(rb"(?P<comment>/\*[\s\S]*?\*/)", _TEXT_STRING, *_TEXT_TAIL), set(), set(), False)
@@ -551,6 +552,61 @@ def build_tree(relpaths):
 
 # ---------------------------------------------------------------- main
 
+def write_index(out, name, root, dirs, files, file_dir, results, skipped, seconds, extra=None):
+    """Assemble the index arrays from one ("ok", ...) tuple per file (see
+    index_file) and write out/index.npz + index.json; `extra` is merged
+    into the JSON (a corpus adapter's own keys, such as book_index.py's
+    "corpus"). Returns the stats dict."""
+    n_files = len(files)
+    chars = b"".join(r[4] for r in results)
+    kinds = b"".join(r[5] for r in results)
+    line_len = np.concatenate([r[6] for r in results]) if n_files else np.zeros(0, np.uint16)
+    line_indent = np.concatenate([r[7] for r in results]) if n_files else np.zeros(0, np.uint16)
+    n_lines = len(line_len)
+    lines_per_file = np.array([len(r[6]) for r in results], np.int64)
+    file_line0 = np.zeros(n_files + 1, np.uint32)
+    file_line0[1:] = np.cumsum(lines_per_file)
+    line_off = np.zeros(n_lines + 1, np.uint64)
+    np.cumsum(line_len.astype(np.uint64), out=line_off[1:])
+    line_file = np.repeat(np.arange(n_files, dtype=np.uint32), lines_per_file)
+    file_chars = np.array([r[8] for r in results], np.uint32)
+
+    items = []
+    for fi, r in enumerate(results):
+        for (s, e, k, nm) in r[9]:
+            items.append({"file": fi, "start": int(s), "end": int(e), "kind": int(k), "name": nm})
+    item_file = np.array([it["file"] for it in items], np.uint32)
+    item_start = np.array([it["start"] for it in items], np.uint32)
+    item_end = np.array([it["end"] for it in items], np.uint32)
+    item_kind = np.array([it["kind"] for it in items], np.uint8)
+
+    os.makedirs(out, exist_ok=True)
+    np.savez(os.path.join(out, "index.npz"),
+             chars=np.frombuffer(chars, np.uint8), kinds=np.frombuffer(kinds, np.uint8),
+             line_off=line_off, line_file=line_file, line_indent=line_indent, line_len=line_len,
+             file_line0=file_line0, file_chars=file_chars,
+             file_dir=np.array(file_dir, np.uint32),
+             item_file=item_file, item_start=item_start, item_end=item_end, item_kind=item_kind)
+
+    meta = {
+        "root": root, "name": name,
+        "files": [{"path": rel, "lang": r[3], "lines": int(len(r[6])), "bytes": int(r[2])}
+                  for rel, r in zip(files, results)],
+        "dirs": dirs,
+        "items": items,
+        "kinds": KINDS,
+        "stats": {"files": n_files, "dirs": len(dirs), "lines": int(n_lines), "chars": len(chars),
+                  "items": len(items), "skipped_binary": skipped["binary"],
+                  "skipped_large": skipped["large"], "skipped_submodules": skipped["submodules"],
+                  "seconds": seconds},
+    }
+    if extra:
+        meta.update(extra)
+    with open(os.path.join(out, "index.json"), "w") as f:
+        json.dump(meta, f)
+    return meta["stats"]
+
+
 def default_workers():
     return max(1, (os.cpu_count() or 2) // 2)
 
@@ -640,57 +696,14 @@ def main():
         dirs, files, file_dir = build_tree(kept)
         results = [by_rel[rel] for rel in files]
 
-    n_files = len(files)
-    chars = b"".join(r[4] for r in results)
-    kinds = b"".join(r[5] for r in results)
-    line_len = np.concatenate([r[6] for r in results]) if n_files else np.zeros(0, np.uint16)
-    line_indent = np.concatenate([r[7] for r in results]) if n_files else np.zeros(0, np.uint16)
-    n_lines = len(line_len)
-    lines_per_file = np.array([len(r[6]) for r in results], np.int64)
-    file_line0 = np.zeros(n_files + 1, np.uint32)
-    file_line0[1:] = np.cumsum(lines_per_file)
-    line_off = np.zeros(n_lines + 1, np.uint64)
-    np.cumsum(line_len.astype(np.uint64), out=line_off[1:])
-    line_file = np.repeat(np.arange(n_files, dtype=np.uint32), lines_per_file)
-    file_chars = np.array([r[8] for r in results], np.uint32)
-
-    items = []
-    for fi, r in enumerate(results):
-        for (s, e, k, nm) in r[9]:
-            items.append({"file": fi, "start": int(s), "end": int(e), "kind": int(k), "name": nm})
-    item_file = np.array([it["file"] for it in items], np.uint32)
-    item_start = np.array([it["start"] for it in items], np.uint32)
-    item_end = np.array([it["end"] for it in items], np.uint32)
-    item_kind = np.array([it["kind"] for it in items], np.uint8)
-
-    os.makedirs(args.out, exist_ok=True)
-    np.savez(os.path.join(args.out, "index.npz"),
-             chars=np.frombuffer(chars, np.uint8), kinds=np.frombuffer(kinds, np.uint8),
-             line_off=line_off, line_file=line_file, line_indent=line_indent, line_len=line_len,
-             file_line0=file_line0, file_chars=file_chars,
-             file_dir=np.array(file_dir, np.uint32),
-             item_file=item_file, item_start=item_start, item_end=item_end, item_kind=item_kind)
-
     seconds = round(time.time() - t0, 2)
-    meta = {
-        "root": root, "name": args.name,
-        "files": [{"path": rel, "lang": r[3], "lines": int(len(r[6])), "bytes": int(r[2])}
-                  for rel, r in zip(files, results)],
-        "dirs": dirs,
-        "items": items,
-        "kinds": KINDS,
-        "stats": {"files": n_files, "dirs": len(dirs), "lines": int(n_lines), "chars": len(chars),
-                  "items": len(items), "skipped_binary": skipped["binary"],
-                  "skipped_large": skipped["large"], "skipped_submodules": skipped["submodules"],
-                  "seconds": seconds},
-    }
-    with open(os.path.join(args.out, "index.json"), "w") as f:
-        json.dump(meta, f)
+    stats = write_index(args.out, args.name, root, dirs, files, file_dir, results, skipped, seconds)
+    n_files, n_lines, n_chars = stats["files"], stats["lines"], stats["chars"]
     langs = {}
     for r in results:
         langs[r[3]] = langs.get(r[3], 0) + 1
     print(f"wrote {args.out}/index.npz + index.json: {n_files} files ({langs}), {len(dirs)} dirs, "
-          f"{n_lines} lines, {len(chars) / 1e6:.2f} M chars, {len(items)} items, "
+          f"{n_lines} lines, {n_chars / 1e6:.2f} M chars, {stats['items']} items, "
           f"skipped {skipped}, {seconds}s")
 
 

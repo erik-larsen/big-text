@@ -30,6 +30,11 @@ Regenerate everything with:
 ./atlas_viewer.py data/big-text_atlas --inspect Viewer --frames 2 --screenshot docs/shots/big-text/inspector.png
 ./atlas_viewer.py data/big-text_atlas --inspector --frames 1 --screenshot docs/shots/big-text/coverage.png
 ./atlas_viewer.py data/big-text_atlas --compare '~22' --history --select atlas_viewer.py --frames 1 --screenshot docs/shots/big-text/history_file.png
+./book_index.py --gutenberg 2600 --out data/war-and-peace_atlas
+./atlas_layout.py data/war-and-peace_atlas --preview docs/shots/war-and-peace_layout.png
+./atlas_viewer.py data/war-and-peace_atlas --shots docs/shots/war-and-peace --filter Natasha --stats
+./atlas_viewer.py data/war-and-peace_atlas --proj 3d --tilt 55 --yaw 12 --goto "p. 481:1" --zoom 3 --frames 2 --no-hover --screenshot docs/shots/war-and-peace/hero.png
+./atlas_viewer.py data/war-and-peace_atlas --goto "p. 17:1" --zoom 11 --frames 2 --no-hover --screenshot docs/shots/war-and-peace/opening.png
 ```
 
 "N px per line" below means N device pixels per line for the file under the view centre (`atlas_resolve.py` in big-text, `platform/src/draw_shader.rs` in makepad-draw); files with a larger or smaller pitch sit on other rungs in the same frame, which is the per-file ladder at work.
@@ -38,10 +43,12 @@ Regenerate everything with:
 
 - `big-text/hero.png`: big-text's own source fitted in 3D at tilt 55 and yaw 12 with the churn lens on and the revision rail shown: the most edited files ember, the roofs at the rungs their sizes allow.
 - `makepad-draw/hero.png`: the same on makepad-draw at 2.2 px per line about `platform/src/window.rs`: the near roofs at the tokens and text rungs, the far ones at bars.
+- `war-and-peace/hero.png`: War and Peace in 3D at tilt 55 and yaw 12, 3 px per line about page 481 (Book Five): the near pages at the text rung, the far rows at bars, the Books as terraces with their labels stacked along the left edge. The README's second image.
 
 ## Layout previews
 
 - `big-text_layout.png`: the layout stage's own render of big-text (33 files, about 9,500 lines): the `docs/`, `tests/`, `shaders/` and `notes/` bands, files as 1 px outlines wrapped into columns, one grey bar per line from indent to length.
+- `war-and-peace_layout.png`: the book: the front matter, then every Book a full-width band of whole page rows, 65 pages across, one grey bar per line, a chapter's last page short.
 - `makepad-draw_layout.png`: the same for makepad/draw plus makepad/platform (493 files, 280,607 lines, 53 directories): nested directory bands in the top-level hue, big files wrapped into up to 14 columns, tiny files as slivers.
 
 ## big-text (its own source: 33 files, about 9,500 lines, 23 commits)
@@ -93,6 +100,17 @@ The default example, so the counts move by a few lines whenever this documentati
 - `makepad-draw/history_file.png`: `vulkan.rs` selected with the Changes lens on: the Inspector's History block under the selection (commits, dates, lines, newest five commits) before the Uses and Used-by lists.
 - `makepad-draw/hover_symbol.png`: the cursor held on `Window` in x11_sys.rs at text zoom: the label reads the resolver's view, `type Window · 2 definitions · 102 references`.
 - `makepad-draw/result.png`: after stepping to result 1: the fly-to ends on `pub type Window = XID;` at 41 px per line with the hit box, the 3 px file border and the crumb trail `← makepad-draw › platform › src › os › linux › x11`.
+
+## War and Peace (Project Gutenberg 2600: 18 parts, 366 chapters, 1401 pages, 63,191 lines, 2.63 million glyphs)
+
+`--shots` takes the first seven images only: a book has no resolver and no history, so no references layout, Layers lens, lenses or rail.
+
+- `war-and-peace/overview.png`: the map fitted: `Front Matter` on top, then the 15 Books and two epilogues as bands of whole page rows in reading order, each labelled, each page a cell at the line-bars rung, the last row of every Book short.
+- `war-and-peace/bars.png`, `tokens.png`, `text.png`: 2, 4.5 and 16 px per line about the centre (Book Eight): pages as blocks of grey bars, then pages of word blocks, then pages of legible prose, the empty right end of a band as a coloured field.
+- `war-and-peace/hover.png`: the text view hovered at the centre: the label `Book Eight: 1811 - 12/Chapter IX/p. 657` (part, chapter, page; a book has no items).
+- `war-and-peace/filter.png`: the fitted map with the filter `Natasha`: 1,213 mentions on 299 pages, every hit page outlined in yellow, the panel listing them by page, the status line `0 definitions · 1213 references · 299 files · 0/1213`.
+- `war-and-peace/result.png`: after stepping to the first mention (Book One, Chapter XI, p. 56, line 41), the fly-to at text zoom with the hit filled yellow.
+- `war-and-peace/opening.png`: `--goto "p. 17:1" --zoom 11`: the book's first pages, the contents on the front-matter pages above `Book One: 1805` and Chapter I.
 
 ## Frame times
 

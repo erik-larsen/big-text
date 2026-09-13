@@ -6,6 +6,10 @@ big-text is the text-scale sibling of [big-picture](https://github.com/erik-lars
 
 *big-text viewing itself: 33 files and about 9,500 lines tilted into 3D with the churn lens, the most edited files ember, every roof carrying its code at the rung its size allows, and the rail along the bottom the repository's commits.*
 
+![War and Peace in 3D at 3 pixels per line: the near pages as text, the far rows as line bars, the Books as coloured terraces](docs/shots/war-and-peace/hero.png)
+
+*The same viewer on War and Peace, Dobbie's example: 1,401 pages and 2.63 million glyphs as one surface, the Books as terraces, the near pages at the text rung and the far rows at bars in the same frame.*
+
 It shows three kinds of content, in this order of priority: text, images, 2D vector work. Each has an open-source lineage, and the ladder that ties them together has a fourth:
 
 | Content | Lineage | Licence | What it contributes | Pinned as |
@@ -57,7 +61,7 @@ The presentation layer is corpus-blind. Every corpus big-text intends to show bo
 | Images | photos and other large images, images in a PDF | big-picture's tile pyramid and virtual texturing |
 | 2D vectors | drawings in a PDF, layouts of a DXF | stroke and fill shaders with stroke level of detail from HEPR; [dxf-visual-spec](https://github.com/erik-larsen/dxf-visual-spec) supplies the DXF semantics |
 
-A page of War and Peace and a file of Rust are the same thing to the text renderers; a DXF and a PDF floorplan are the same thing to the path renderers. Adding a corpus costs no new shader. What differs per corpus is three functions, not a rendering algorithm: the hierarchy (folder tree, chapter and page, year and month, layer and block), the layout (treemap for code, reading order for a book, mosaic for photos, sheets for DXF), and the aggregate colour of a node too small to show its contents (token-kind mix, average colour, layer colour). A corpus adapter supplies those three; the ladder, camera, budget, hit testing and fly-overs are shared. Collections of books, repositories or drawings are hierarchies with documents as internal nodes and need nothing new. Everything is flat: one 2D plane and one camera, the 3D projection being a way of looking at that plane rather than a third kind of content. No adapter interface gets written until three adapters exist: code is built, a book is nearly the same adapter, photos and DXF are the real second and third.
+A page of War and Peace and a file of Rust are the same thing to the text renderers; a DXF and a PDF floorplan are the same thing to the path renderers. Adding a corpus costs no new shader. What differs per corpus is three functions, not a rendering algorithm: the hierarchy (folder tree, chapter and page, year and month, layer and block), the layout (treemap for code, reading order for a book, mosaic for photos, sheets for DXF), and the aggregate colour of a node too small to show its contents (token-kind mix, average colour, layer colour). A corpus adapter supplies those three; the ladder, camera, budget, hit testing and fly-overs are shared. Collections of books, repositories or drawings are hierarchies with documents as internal nodes and need nothing new. Everything is flat: one 2D plane and one camera, the 3D projection being a way of looking at that plane rather than a third kind of content. No adapter interface gets written until three adapters exist: code and a book are built, and the book cost one indexer and one placement function (`book_index.py`, and the page grid in `atlas_layout.py`), the resolver and history stages simply not applying; photos and DXF are the real second and third.
 
 ## Install
 
@@ -108,6 +112,14 @@ git submodule update --init makepad
 ./atlas_history.py data/makepad-draw_atlas
 ./atlas_layout.py data/makepad-draw_atlas
 ./atlas_viewer.py data/makepad-draw_atlas
+```
+
+For the book, Dobbie's example: fetch War and Peace from Project Gutenberg (3.4 MB, once, into `data/gutenberg/`), split it into its 15 Books and two epilogues, 366 chapters and 1,401 pages of 52 lines, and lay the pages out in reading order, one band of whole page rows per Book. Half a second, and the viewer, filter and fly-to work unchanged; there is no resolver or history for a book, so no Inspector, lenses or rail:
+
+```bash
+./book_index.py --gutenberg 2600 --out data/war-and-peace_atlas
+./atlas_layout.py data/war-and-peace_atlas
+./atlas_viewer.py data/war-and-peace_atlas
 ```
 
 Glyphs from 12 device pixels per line come from the vector tier by default, crisp at any magnification; the first run builds its curve and band textures in a tenth of a second and caches them under `data/`, and `--no-vector-text` keeps the raster atlas at every size. `--goto path:line`, `--zoom PX_PER_LINE`, `--filter WORD`, `--step K`, `--color churn|age|changes`, `--rev HASH`, `--compare HASH`, `--history`, `--frames N --screenshot out.png`, `--shots DIR` and `--stats` script the viewer for screenshots and timing; `docs/shots/README.md` lists the commands that made every image here.
@@ -200,12 +212,27 @@ A file selected with the Changes lens on: the Inspector shows its commits, dates
 
 ![file history](docs/shots/big-text/history_file.png)
 
+### A book
+
+The same images for War and Peace, in `docs/shots/war-and-peace/`. The map fitted: the front matter, then every Book a band of whole page rows in reading order, 65 pages across, each page a cell of one size, a chapter's last page short, a Book's last row short.
+
+![the book fitted](docs/shots/war-and-peace/overview.png)
+
+The book opens: the contents on the front-matter pages, then `Book One: 1805` and the first line of Chapter I, at 11 pixels per line.
+
+![the opening pages](docs/shots/war-and-peace/opening.png)
+
+The filter `Natasha`: 1,213 mentions on 299 pages, every page with one outlined in yellow, and the fly-to landing on the first, the hit filled yellow at text zoom.
+
+![Natasha filtered](docs/shots/war-and-peace/filter.png)
+![the first mention](docs/shots/war-and-peace/result.png)
+
 ## Implementation
 
 The contract the code was built against is [docs/DESIGN.md](docs/DESIGN.md), with the deviations found while building. The short version:
 
-- **Index.** `atlas_index.py` walks the tree (honouring `.gitignore`, skipping binaries and submodules), expands tabs, maps every character to one column, and runs a small regex tokenizer per language family (Rust, C-like, Python, shell, plain) that gives every character one of ten kinds. Items (functions, structs, enums, impls, modules) come from regexes with brace or indentation matching. The output is a handful of numpy arrays: characters, kinds, line offsets, file ranges, item ranges.
-- **Layout.** `atlas_layout.py` is a squarified treemap over the directory tree with padding per level, which the viewer draws as the directory band, so the bands widen as you zoom. It writes one layout per metric (tokens, references from the resolver's fan-in, churn, lines) and the toolbar switches between them with a hard cut, the world staying the same size so the camera does not move. Each file is wrapped into as many equal columns as keep a 90th-percentile line width readable; lines longer than a column wrap inside it, continuation rows hanging in by two characters. `tests/check_layout.py` checks the invariants.
+- **Index.** `atlas_index.py` walks the tree (honouring `.gitignore`, skipping binaries and submodules), expands tabs, maps every character to one column, and runs a small regex tokenizer per language family (Rust, C-like, Python, shell, plain) that gives every character one of ten kinds. Items (functions, structs, enums, impls, modules) come from regexes with brace or indentation matching. The output is a handful of numpy arrays: characters, kinds, line offsets, file ranges, item ranges. `book_index.py` writes the same index from a Project Gutenberg text: a heading line such as `BOOK ONE: 1805` opens a part, `CHAPTER I` a chapter, and every 52 lines of a chapter are a page, the file, named `Book One: 1805/Chapter I/p. 17`; the text is kept as Gutenberg wrapped it and normalised to ASCII (curly quotes straight, the em dash two hyphens, accents stripped, so Natásha is Natasha until the glyph tiers cover more than ASCII), and words are the identifier kind, with no string literals and no items.
+- **Layout.** `atlas_layout.py` is a squarified treemap over the directory tree with padding per level, which the viewer draws as the directory band, so the bands widen as you zoom. It writes one layout per metric (tokens, references from the resolver's fan-in, churn, lines) and the toolbar switches between them with a hard cut, the world staying the same size so the camera does not move. Each file is wrapped into as many equal columns as keep a 90th-percentile line width readable; lines longer than a column wrap inside it, continuation rows hanging in by two characters. `tests/check_layout.py` checks the invariants. A book skips the treemap: its parts are full-width bands of whole page rows in reading order, every page one cell of the size that lets one column hold the book's line width, so 65 pages across for War and Peace, and every page pitched as a full page so a short last page keeps its chapter's text size.
 - **The ladder.** Per frame the viewer computes device pixels per line for every file and picks a rung: under 1, sampled one-pixel bars; 1 to 3, one grey bar per line from indent to length, with items as filled bands in their kind colour beneath; 3 to 6, one block per character in its kind colour plus item outlines; 6 and up, glyphs. The switches are hard cuts, as in the video. Everything is resident: characters and kinds as 8-bit textures, lines and files as float and integer textures, one instanced quad per line drawn per run of visible files.
 - **Glyphs.** `atlas_font.py` rasterises the 95 printable ASCII glyphs of one monospace face into a mipmapped atlas that also draws the UI; the line box is the face's ASCII ink extents rather than its OS/2 box, so a change of face does not change the proportions of the layout. `vt_glyphs.py` builds the vector tier's data in Slug's form: quadratic outlines from fontTools as float32 control points in a curve texture, and per glyph horizontal and vertical bands over its ink box, each listing the curves that cross it sorted for the shader's early exit. `shaders/vt_glyph.glsl` is a GLSL translation of the reference pixel shader: the sign-bit root rule, two axis rays with a box filter, the weighted combination.
 - **Resolver.** `atlas_resolve.py` parses every file with tree-sitter and collects entities (functions, methods, structs, fields, enums, variants, traits, type aliases, consts, statics, modules, macros, type parameters, parameters, locals) and every identifier use. Each use is resolved lexically, in order: the enclosing function's locals, the file, the file's `use` imports through the crate found by its Cargo.toml, a unique name in the crate, a unique name in the corpus; what is left is ambiguous, external, missing import, missing macro or not found, and the counts of each are the Inspector's coverage block. No type inference, so a method after a dot with several candidates is "method dispatch", the same category Rik's analyser reports. Rust is covered fully; Python and C get functions, types, parameters and locals. All of makepad resolves in 25 seconds on ten cores: 864k entities and 4.7 million references, 64 percent of them resolved, across 317 crates; Rik's Inspector reports 722k entities and 1.3 million edges for the same tree, so the scale matches even though the rules do not.
@@ -239,8 +266,8 @@ Not built: the palette and legend buttons, and a streaming working set; the whol
 
 The decisions and their reasons are in [docs/DESIGN.md](docs/DESIGN.md), the checklist against the makepad video in [docs/PARITY.md](docs/PARITY.md). Open:
 
-1. **The next corpus.** A book is nearly the code adapter (pages as files, reading order as the layout); photos exercise the image payload and big-picture's pyramid and are the first real test of the adapter split; a dagcmp volume is the largest hierarchy with the least text. Proposal: book, then photos, then DXF.
-2. **Fonts beyond ASCII monospace.** Unicode coverage and proportional faces for books, and a serif face chosen from the OFL families with quadratic outlines (Literata, Libertinus Serif) when the book corpus starts.
+1. **The next corpus.** The book took the code adapter with pages as files and reading order as the layout, and cost no shader; photos exercise the image payload and big-picture's pyramid and are the first real test of the adapter split; a dagcmp volume is the largest hierarchy with the least text. Proposal: photos, then DXF.
+2. **Fonts beyond ASCII monospace.** The book is drawn in the monospace face on Gutenberg's own line breaks, its accents stripped. A proportional serif from the OFL families with quadratic outlines (Literata, Libertinus Serif) needs per-glyph advances in the layout and the atlas, and the accented letters need the tiers to cover more than 32 to 126: the whole of War and Peace fits in one byte per character (Windows-1252 covers its quotes, dashes and accents), so the character texture need not change.
 3. **The browser.** Python with OpenGL 3.3 is the prototype; the browser is the target. The contract for getting there is the files and the shaders, not the Python: every generated `.npz` gets a documented binary layout, and every shader stays within GLSL ES 3.0 (texelFetch and integer samplers in, geometry shaders and bindless out), so a WebGL2 viewer reads the same atlases and links the same shaders. WebGPU later, from the same data.
 4. **Budget and eviction.** Per-file instance ranges under a byte budget for text and big-picture's pages for images; whether one budget covers both. Built only once a corpus needs it.
 5. **The handoff from raster glyphs to line bars.** Where a pixel starts to cover several glyphs and per-glyph quads overdraw: a hard cut at a pixels-per-line threshold as today, a blend, or whole lines cached as texture rows first. The one place the ladder is not yet designed, and the same problem in all three payloads.
@@ -257,7 +284,7 @@ big-text is MIT ([LICENSE](LICENSE), Erik Larsen). What it reuses, with the lice
 | HEPR | soadzoor, MIT | pin at c81c326 (0.1.29); its stroke and fill shaders will be translated with their notices when the vector work starts |
 | Dobbie's technique, formats and tiers | Will Dobbie, 2016, blog posts, no licence published | reimplement from the posts; no code or data of his is used |
 | JetBrains Mono NL | JetBrains, OFL 1.1 | pin: `fonts/JetBrainsMonoNL-Regular.ttf` with `fonts/OFL.txt` and `fonts/AUTHORS.txt`; the atlases the viewer builds from it are embeddings in the OFL's sense |
-| War and Peace | Leo Tolstoy, Maude translation, public domain via Project Gutenberg | the book corpus, laid out by big-text itself, when that corpus starts |
+| War and Peace | Leo Tolstoy, Maude translation, public domain via Project Gutenberg (ebook 2600) | the book corpus: `book_index.py --gutenberg 2600` fetches it into `data/gutenberg/`, which git ignores; nothing of it is committed but the screenshots |
 
 The default face is JetBrains Mono NL Regular: OFL, TrueType with quadratic outlines so the vector tier converts nothing, and legible at the small sizes the ladder spends most of its time at. Its OS/2 line box carries 1.32 em of leading, which would shrink every glyph at a given pixels per line, so the line box is defined as the face's ASCII ink extents, 1.05 em. `--font` takes any face on the machine; nothing generated from a font is committed.
 
@@ -273,6 +300,7 @@ big-text/
   docs/shots/                  screenshots and the commands that made them
   notes/makepad-code-atlas.md  what the public makepad history and the video say about the code atlas
   atlas_index.py               source tree -> data/<name>_atlas/index.npz + index.json
+  book_index.py                Project Gutenberg text -> the same index: parts, chapters, pages of 52 lines
   atlas_resolve.py             tree-sitter entities and lexically resolved references -> resolve.npz + resolve.json
   atlas_history.py             git log --numstat over the indexed directories -> history.npz + history.json
   atlas_layout.py              index -> layout.npz (tokens), layout_references.npz, layout_churn.npz, layout_lines.npz, layout_layers.npz
@@ -282,6 +310,6 @@ big-text/
   shaders/                     GLSL 330, one file per program (dir, file, line, rect, text, wall, vt_glyph)
   tests/                       layout invariants, viewer input and history driven by synthetic input, vector glyph accuracy, the tier measurement (bench_vt.py), a throwaway-repo history test
   fonts/                       JetBrains Mono NL with its OFL licence
-  data/                        generated atlases and glyph caches (gitignored)
+  data/                        generated atlases, glyph caches and fetched books (gitignored)
   big-picture/, dagcmp/, makepad/, hepr/, slug/   submodules, pinned
 ```
