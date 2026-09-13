@@ -954,11 +954,10 @@ class Viewer:
         self.tex_glyphs = texture_2d(GL_R8, GL_RED, GL_UNSIGNED_BYTE,
                                      self.glyphs[:, :, None], GL_LINEAR, mipmap=True)
         gpu += int(self.glyphs.nbytes * 4 / 3)
-        textures = [self.tex_chars, self.tex_kinds, self.tex_glyphs, self.tex_line_f,
-                    self.tex_line_u, self.tex_file_f, self.tex_file_u, self.tex_dir_f]
+        self.vt_textures = ()
         if self.vt is not None:
             import vt_glyphs
-            textures += list(vt_glyphs.make_textures(self.vt[0], self.vt[1]))
+            self.vt_textures = tuple(vt_glyphs.make_textures(self.vt[0], self.vt[1]))
             gpu += self.vt[0].nbytes + self.vt[1].nbytes
         self.gpu_bytes = gpu
 
@@ -988,9 +987,7 @@ class Viewer:
             loc = glGetUniformLocation(p, "uVtMin")
             if loc >= 0:
                 glUniform1f(loc, VT_MIN_PPL)
-        for i, tex in enumerate(textures):
-            glActiveTexture(GL_TEXTURE0 + i)
-            glBindTexture(GL_TEXTURE_2D, tex)
+        self.bind_textures()
 
     @property
     def lens(self):
@@ -1088,10 +1085,18 @@ class Viewer:
         return gpu
 
     def bind_textures(self):
-        for i, tex in enumerate([self.tex_chars, self.tex_kinds, self.tex_glyphs, self.tex_line_f,
-                                 self.tex_line_u, self.tex_file_f, self.tex_file_u, self.tex_dir_f]):
+        """Bind every texture to its unit, the vector tier's two included.
+        Called after anything created or re-uploaded a texture: texture
+        creation and glTexSubImage2D bind on whatever unit is active, which
+        after setup is the last one, the band texture's, so a lens upload
+        once replaced the bands with the file texture and the glyphs went
+        blank."""
+        textures = [self.tex_chars, self.tex_kinds, self.tex_glyphs, self.tex_line_f,
+                    self.tex_line_u, self.tex_file_f, self.tex_file_u, self.tex_dir_f] + list(self.vt_textures)
+        for i, tex in enumerate(textures):
             glActiveTexture(GL_TEXTURE0 + i)
             glBindTexture(GL_TEXTURE_2D, tex)
+        glActiveTexture(GL_TEXTURE0 + 5)          # uFileF: the unit a lens upload re-binds on
 
     def set_metric(self, metric):
         self.set_layout(metric)

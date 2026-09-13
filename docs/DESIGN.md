@@ -467,3 +467,11 @@ Results (README, Implementation): against exact coverage the Slug tier's ink err
 `dobbie/fetch.sh` was exercised: two files deleted and fetched again, twelve verified. The indexer, the layout, the viewer and every test run with no font on the machine. The screenshots were regenerated with the bundled face and the vector tier on; the layouts were rebuilt for its character aspect (0.5714 against Menlo's 0.5711 under the same ink-box rule, so nothing visible moved). `THIRD_PARTY_NOTICES` lists Slug, JetBrains Mono, the Dobbie demos (not included) and the submodules.
 
 Not done, by design: the history rewrite. Every commit before phase 6 holds the ten demo files and the port; `git filter-repo` on those paths, or a fresh root, before the repository goes public.
+
+## Found in the phase 6 demo
+
+Two bugs, both older than phase 6, surfaced when the viewer was run interactively with everything on.
+
+The vector tier went blank whenever a colour lens was set. `upload_lens` re-uploaded the file texture with `glTexSubImage2D` after a bare `glBindTexture`, which binds on whatever texture unit is active; after setup that is the last unit, the vector tier's band texture, so the lens upload replaced the bands with the file texture. Texture creation in `upload_layout` binds the same way, so a layout switch could do it too. `bind_textures` now binds every texture including the vector tier's two and leaves unit 5 (the file texture) active, and is called after setup and after every upload. The screenshot sets never showed it because no shot combined a lens with text zoom.
+
+In 3D at close range the item outlines painted solid triangles over half of every rectangle. `rect.glsl` measured its border in screen space against a box spanned by two projected opposite corners, which does not contain a perspective trapezoid; every fragment outside the box had a negative distance and took the border colour. The border is now measured in world units against the world size of a device pixel from `fwidth`, as `file.glsl` and `dir.glsl` already did; the UI path keeps its screen-space measure. The phase 3 and 4 shots at 3 px per line had the artefact and it was read as texture at the time.
