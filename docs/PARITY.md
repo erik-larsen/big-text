@@ -57,7 +57,7 @@ The plan for reaching everything the video and the makepad commit messages show,
 
 **Phase 5, History lens (done).** Row 29. `atlas_history.py` reads one `git log --numstat` into per-file churn and recency and a per-revision table; churn is a fourth metric; churn, age and changes are colour lenses on the file fill; the rail loads the corpus at a commit (`git archive`, index, layout, cached) and swaps every texture with the camera kept; change lighting between the loaded and a compare revision matches `git diff --name-status`. Contract and as-built notes in DESIGN.md.
 
-**Phase 6, the vector tier rewrite (done).** Not a parity row: the copyright step. `shaders/vt_glyph.glsl` is a GLSL translation of Lengyel's MIT reference pixel shader and `vt_glyphs.py` builds its curve and band textures; the Dobbie port is gone from the tree; `dobbie/` holds only the README and a fetch script with the twelve checksums, the files themselves ignored; the default face is the bundled JetBrains Mono NL (OFL) with the line box defined as the ASCII ink extents so no proportion moved; `tests/bench_vt.py` measured the three tiers against exact coverage (README, Implementation): Slug halves the port's error and cuts sparkle by an order of magnitude at every size, costs a tenth more time, beats the raster tier's error down to 12 px per line, where the handoff now sits, and is on by default. Open: the history still holds the port and the demo files, to be rewritten or left behind before going public.
+**Phase 6, the vector tier rewrite (done).** Not a parity row: the copyright step. `shaders/vt_glyph.glsl` is a GLSL translation of Lengyel's MIT reference pixel shader and `vt_glyphs.py` builds its curve and band textures; the Dobbie port is gone from the tree; `dobbie/` holds only the README and a fetch script with the twelve checksums, the files themselves ignored; the default face is the bundled JetBrains Mono NL (OFL) with the line box defined as the ASCII ink extents so no proportion moved; `tests/bench_vt.py` measured the three tiers against exact coverage (README, Implementation): Slug halves the port's error and cuts sparkle by an order of magnitude at every size, costs a tenth more time, beats the raster tier's error down to 12 px per line, where the handoff now sits, and is on by default. The history was then rewritten to drop the port and the demo files before the repository went public.
 
 **Phase 7, scale (1 to 2 sessions).** Row 32. Per-file instance ranges with a byte budget, retirement of files off screen, so a corpus past ten million lines works. Only if a corpus that needs it exists.
 
@@ -73,7 +73,7 @@ The plan for reaching everything the video and the makepad commit messages show,
 
 ## Where things stand (2026-09-12, after phase 6)
 
-Done: phases 0 to 6, rows 1 to 31 except the palette and legend buttons of row 24; 31 of the 36 rows are checked, and the vector tier is on Slug. Next: phase 7 (streaming) and 8 (MCP, disk mode); before going public, the history rewrite the README's copyright path describes. Not pursued: 120 Hz, 2.5D as a mode of its own.
+Done: phases 0 to 6, rows 1 to 31 except the palette and legend buttons of row 24; 31 of the 36 rows are checked, and the vector tier is on Slug. Next: phase 7 (streaming) and 8 (MCP, disk mode). The history was rewritten on 2026-09-12 to drop the Dobbie files and the shader port before the repository went public. Not pursued: 120 Hz, 2.5D as a mode of its own.
 
 To resume in a fresh clone (the generated data is not in git):
 
