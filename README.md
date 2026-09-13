@@ -59,13 +59,38 @@ A page of War and Peace and a file of Rust are the same thing to the text render
 
 The rule for keeping this honest: no adapter interface until three adapters exist. Code is built; a book is nearly the same adapter; photos are the real second one and DXF the third.
 
-## Build
+## Install
 
-Python 3.12 with numpy, Pillow, PyOpenGL, glfw, fontTools and tree-sitter with its Rust, Python and C grammars (`pip install numpy Pillow PyOpenGL glfw fonttools tree-sitter tree-sitter-rust tree-sitter-python tree-sitter-c`), an OpenGL 3.3 capable GPU, and no font: the default face, JetBrains Mono NL, is bundled under `fonts/` with its OFL licence, and `--font` takes any other TTF/TTC/OTF on `atlas_viewer.py` and `atlas_layout.py`. The submodules are only needed as corpora: `git submodule update --init big-picture` is enough to try it, `makepad` adds 3.7 million lines.
+1. Clone, and fetch the corpora you want. The submodules are corpora and references, not dependencies: `big-picture` is 19 files and enough to try everything, `makepad` adds 3.7 million lines for the full-size view, `dagcmp` and `hepr` are pinned for later phases and need not be fetched.
+
+```bash
+git clone https://github.com/erik-larsen/big-text.git
+cd big-text
+git submodule update --init big-picture     # add makepad for the large corpus (300 MB)
+```
+
+2. Python 3.12 with the packages in `requirements.txt`, in a virtual environment. numpy, Pillow, PyOpenGL, glfw and fontTools run everything but the resolver; tree-sitter and its Rust, Python and C grammars are for `atlas_resolve.py` only.
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+3. A GPU and driver with OpenGL 3.3 core: any Mac of the last decade, Linux with Mesa or vendor drivers. Developed and measured on macOS with an M4; Linux should work and is untested; Windows is untested. Nothing else is needed: the default face is bundled under `fonts/` with its OFL licence (`--font` takes any other TTF/TTC/OTF on `atlas_viewer.py` and `atlas_layout.py`), and git is used only by the history stage.
+
+4. Check the install. The first test needs no window; the second opens a hidden one and compares the vector tier against Pillow.
+
+```bash
+./tests/test_history.py
+./tests/test_vt_glyphs.py
+```
+
+There is no build step: the scripts run in place, and the "build" is generating an atlas from a corpus, which is the first three commands of the next section.
 
 ## Run
 
-Five steps: index a source tree, resolve its names, read its git history, lay it out, view it. Everything generated lands under `data/`, which git ignores. The resolve and history steps are optional; without resolve the filter is a plain word search and there is no Inspector, without history there are no colour lenses and no revision rail.
+Five steps: index a source tree, resolve its names, read its git history, lay it out, view it. Everything generated lands under `data/`, which git ignores, and each step is a script that prints what it did and how long it took. The resolve and history steps are optional; without resolve the filter is a plain word search and there is no Inspector, without history there are no colour lenses and no revision rail.
 
 ```bash
 ./atlas_index.py big-picture
@@ -256,6 +281,7 @@ The font decision: Menlo is Apple's and cannot be redistributed, so the default 
 ```
 big-text/
   README.md                    this file
+  requirements.txt             the Python packages (pip install -r)
   docs/DESIGN.md               the build contract and its deviations
   docs/shots/                  screenshots and the commands that made them
   notes/makepad-code-atlas.md  what the public makepad history and the video say about the code atlas

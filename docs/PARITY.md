@@ -78,7 +78,7 @@ Done: phases 0 to 6, rows 1 to 31 except the palette and legend buttons of row 2
 To resume in a fresh clone (the generated data is not in git):
 
 ```bash
-pip install numpy Pillow PyOpenGL glfw fonttools tree-sitter tree-sitter-rust tree-sitter-python tree-sitter-c
+python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
 git submodule update --init big-picture makepad
 ./atlas_index.py big-picture --out data/big-picture_atlas
 ./atlas_index.py makepad/draw makepad/platform --out data/makepad-draw_atlas
