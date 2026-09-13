@@ -409,7 +409,8 @@ def main():
     stats = write_index(args.out, args.name, os.path.abspath(args.text), dirs, files, file_dir,
                         results, skipped, seconds,
                         extra={"corpus": "book", "page_lines": args.page_lines, "page_rows": args.page_lines + 3,
-                               "encoding": CHARSET, "title": book_title, "author": author, "scheme": scheme})
+                               "encoding": CHARSET, "title": book_title, "author": author, "footer": True,
+                               "scheme": scheme})
     n_chapters = sum(len(c) for _, c in parts)
     print(f"wrote {args.out}/index.npz + index.json: {len(parts)} parts, {n_chapters} chapters, "
           f"{stats['files']} pages, {stats['lines']} lines, {stats['chars'] / 1e6:.2f} M chars "

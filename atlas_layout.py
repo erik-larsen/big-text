@@ -676,6 +676,9 @@ def build_layout(args, z, meta, t0):
             next_full = np.zeros(n_l, bool)
             next_full[:-1] = line_len[1:] > 0
             line_ok = same_file & next_full & (line_indent == 0) & (line_len > 0)
+            if meta.get("footer"):        # a page's last line is its footer: set flush to the same margin
+                last_of_file = np.concatenate((lf_[1:] != lf_[:-1], [True]))
+                line_ok |= last_of_file & (line_len > 0)
             last_row = np.concatenate((row_line[1:] != row_line[:-1], [True]))
             row_ok = np.where(last_row, line_ok[row_line], True)   # a wrapped line's earlier rows are always set flush
             justify = (row_ok, capw[z["line_file"][row_line]])
