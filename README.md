@@ -6,19 +6,19 @@ big-text is the text-scale sibling of [big-picture](https://github.com/erik-lars
 
 *makepad's drawing and platform crates, 493 files and 280,607 lines, tilted into 3D with the churn lens: the most edited files glow ember, every roof carries its code at the rung its size allows, and the rail along the bottom is the repository's 689 commits.*
 
-It shows three kinds of content, in this order of priority: text, images, 2D vector work. Each has an open-source lineage that big-text builds on, and the ladder that ties them together has a fourth:
+It shows three kinds of content, in this order of priority: text, images, 2D vector work. Each has an open-source lineage, and the ladder that ties them together has a fourth:
 
-| Content | Lineage | What it contributes | Where |
-|---|---|---|---|
-| Text | Vector textures and War and Peace (Will Dobbie, 2016) | The two-tier glyph design: outlines stored as quadratic bezier curves in a texture and ray-cast per pixel, so text is crisp at any magnification; a prerendered mipmapped atlas that takes over below two texels per pixel; a whole book laid out once and drawn as one static vertex buffer with per-page ranges | his posts, linked above: the technique and the formats are described there, and nothing of his demos is in this repository |
-| Text | Slug (Eric Lengyel, 2017; public domain since 2026) | The robust vector shader: curves listed per horizontal and vertical band instead of per grid cell, roots selected by classifying control-point signs so no crossing is ever counted twice or missed, an exact box filter along two axis rays, and a vertex shader that dilates each glyph quad by exactly the pixel footprint | Not vendored; the MIT reference shaders are at [EricLengyel/Slug](https://github.com/EricLengyel/Slug), the paper at [JCGT 6(2)](https://jcgt.org/published/0006/02/02/) |
-| Images | big-picture (Erik Larsen, 2026) | The camera and the budget: tile pyramid, virtual texturing, feedback pass, streaming with a fixed GPU footprint, mosaic layout from a folder tree, hover and click on the manifest, the globe | `big-picture/` (submodule, pinned) |
-| 2D vectors | HEPR (soadzoor, 2026) | Analytic stroke and fill shaders for PDF paths with stroke level of detail, a PDF parser with no pdf.js dependency, a greek tier of solid squares once a glyph is under half a pixel tall, search and selection over pre-laid-out text, and a cached document container; WebGL2 and WebGPU backends of the same scene | `hepr/` (submodule, pinned at c81c326, release 0.1.29, 2026-09-08) |
-| The ladder | Studio code atlas (Rik Arends, makepad, Sep 2026) | Semantic level of detail: one ladder from file tile to kind bands to line bars to tokens to text, chosen by pixels per line; a retained GPU working set with a device-derived budget; label layout on worker threads | `makepad/` (submodule, pinned) plus `notes/makepad-code-atlas.md` |
+| Content | Lineage | Licence | What it contributes | Pinned as |
+|---|---|---|---|---|
+| Text | [Vector textures](https://wdobbie.com/post/gpu-text-rendering-with-vector-textures/) and [War and Peace](https://wdobbie.com/post/war-and-peace-and-webgl/) (Will Dobbie, 2016) | none published; reimplemented from the posts, no code or data used | The two-tier glyph design: outlines as quadratic bezier curves in a texture, ray-cast per pixel, crisp at any magnification; a mipmapped raster atlas below two texels per pixel; a whole book laid out once as one static vertex buffer | nothing to pin; the two posts are the reference |
+| Text | [Slug](https://github.com/EricLengyel/Slug) (Eric Lengyel, 2017; [paper](https://jcgt.org/published/0006/02/02/)) | MIT or Apache-2.0; the patent dedicated to the public domain on 2026-03-17 | The robust vector shader: curves listed per band instead of per grid cell, roots chosen from the signs of the control points so no crossing is counted twice or missed, a box filter along two axis rays | `slug/` at be3c13e; its pixel shader translated into `shaders/vt_glyph.glsl` with the notice kept |
+| Images | [big-picture](https://github.com/erik-larsen/big-picture) (Erik Larsen, 2026) | MIT | The camera and the budget: tile pyramid, virtual texturing, feedback pass, streaming under a fixed GPU footprint, mosaic layout from a folder tree | `big-picture/` |
+| 2D vectors | [HEPR](https://github.com/soadzoor/Highly-Efficient-PDF-Renderer) (soadzoor, 2026) | MIT | Analytic stroke and fill shaders for PDF paths with stroke level of detail, a PDF parser, a greek tier for sub-pixel glyphs, search and selection over pre-laid-out text, WebGL2 and WebGPU backends | `hepr/` at c81c326 (0.1.29) |
+| The ladder | [makepad](https://github.com/makepad/makepad) Studio code atlas (Rik Arends, 2026) | MIT or Apache-2.0 | Semantic level of detail: one ladder from file tile to kind bands to line bars to tokens to text, chosen by pixels per line; a retained GPU working set with a device-derived budget | `makepad/` at a2fdeb325, plus `notes/makepad-code-atlas.md` |
 
-HEPR credits Dobbie and keeps his raster tier, so it is also the nearest existing system to what big-text is for text; its own glyph shader loops over every curve of a glyph with no grid or bands, which is why Slug and not HEPR is the text lineage. The code atlas's own crates (code_graph, code_atlas, code_view) are in a private makepad repo; what we have is the public engine underneath it and the commit messages that describe the design, and big-text reimplements the ladder rather than porting their code. The same rule applies to Dobbie: the format and the tiers are his, the code is ours.
+Every lineage with a repository is pinned as a submodule at the commit studied, so what this README says about it can be checked against the code; the pins are references and corpora, not dependencies, and nothing is copied out of them except Slug's pixel shader. Dobbie never published a repository, so his posts are the reference. The code atlas's own crates live in a private makepad repository; big-text reimplements the ladder from the public engine, the commit messages and the video, and reimplements Dobbie's tiers from his posts. HEPR credits Dobbie and keeps his raster tier, but its glyph shader loops over every curve of a glyph, which is why Slug and not HEPR is the text lineage.
 
-Corpora are separate from lineages. [dagcmp](https://github.com/erik-larsen/dagcmp) (Erik Larsen, 2026, MIT, `dagcmp/` submodule) scans a whole NTFS volume from the Master File Table in seconds and gives every node of the tree an aggregate and a compare status; it is the adapter for a filesystem as a corpus, not a way of drawing one.
+[dagcmp](https://github.com/erik-larsen/dagcmp) (Erik Larsen, 2026, MIT, `dagcmp/`) is a corpus rather than a lineage: it scans a whole NTFS volume from the Master File Table in seconds and gives every node of the tree an aggregate and a compare status, which makes it the adapter for a filesystem as a corpus.
 
 ## The idea in one paragraph
 
@@ -34,22 +34,22 @@ The two glyph lineages are one technique with a ten-year gap, and the record is 
 | 2016-01-21 | War and Peace: the raster mip tier for minified text, 2.7 million glyphs as one static buffer |
 | Fall 2016 | Lengyel develops Slug |
 | 2017-03-27 | Slug provisional patent application; the grant, US 10,373,352 (2019-08-06), cites Dobbie's post as prior art |
-| mid 2017 | The JCGT paper: cites Dobbie as the closest published method and benchmarks against him, 5.2 ms against 1.3 ms for the same text after correcting for four rays versus two |
+| mid 2017 | The JCGT paper cites Dobbie as the closest published method and benchmarks against him, 5.2 ms against 1.3 ms for the same text after correcting for four rays versus two |
 | 2026-03-17 | Lengyel dedicates the patent to the public domain and publishes the library's vertex and pixel shaders under MIT |
 
 The patent never covered Dobbie's method. Its one independent claim is the root-selection rule: classify each control point by its sign relative to the ray, then decide from that classification which roots count. Dobbie selects roots by testing whether t lies in (0, 1), which is exactly the step the paper shows to be numerically fragile near shared endpoints and tangents, the cause of his sparkles. So Dobbie's shader was always free to reimplement, and the dedication unlocked only the fix. Everything else in Slug, bands included, was unclaimed or already public in Dobbie's grid.
 
-What each is better at, first from reading both shaders and then, in phase 6, from measuring them (the table in the Implementation section):
+What each is better at, first from reading both shaders and then from measuring them (the table under Implementation):
 
-- **Slug's vector shader is better everywhere the vector shader is used.** It never double-counts a crossing; its bands hold any number of curves where Dobbie's cells hold eight; its two axis rays with an exact box filter cost half of Dobbie's four rotated rays; and its preprocessor widens each band by half the largest expected pixel, so text stays correct down to small legible sizes, where Dobbie's fragment reads one cell and misses the curves of its neighbours once the pixel outgrows the cell. Dobbie's raster tier was the workaround for that; Slug fixed it in the vector path.
-- **Dobbie's two tiers are the only published answer to sub-legible text.** Slug's cost per pixel is the curve count of the band, and its bands are sized for a design-time smallest font. A page thumbnail at a fraction of a pixel per glyph is outside it. A mipmapped raster atlas handles that regime correctly and almost for free, because trilinear filtering is the exact prefilter for a shrinking image. HEPR kept Dobbie's tier for the same reason.
-- **Dobbie's static document is a system design, not a shader.** Lay the corpus out once, keep it resident, draw a page as a vertex range, skip pages off screen. It is the degenerate case of big-picture's streaming with a single tile, and it is what big-text does today.
+- **Slug's vector shader is better everywhere the vector shader is used.** It never double-counts a crossing, its bands hold any number of curves where Dobbie's cells hold eight, its two axis rays cost half of his four, and its bands are widened by half the largest expected pixel, so text stays correct at small sizes where Dobbie's fragment reads one cell and misses its neighbours' curves. His raster tier was the workaround for that.
+- **Dobbie's two tiers are the only published answer to sub-legible text.** Slug's cost per pixel is the curve count of the band and its bands assume a smallest font size; a page thumbnail at a fraction of a pixel per glyph is outside it. A mipmapped raster atlas handles that regime correctly and almost for free, because trilinear filtering is the exact prefilter for a shrinking image. HEPR kept the tier for the same reason.
+- **Dobbie's static document is a system design, not a shader.** Lay the corpus out once, keep it resident, draw a page as a vertex range, skip pages off screen. It is big-picture's streaming with a single tile, and it is what big-text does today.
 
-So big-text keeps Dobbie's architecture and replaces the inside of its vector tier with Slug: bands, the sign-classification rule, the two-ray box filter. That also moves the handoff to raster from Dobbie's fixed two texels per pixel to where the measurement puts it, which turned out to be 12 pixels per line. Below the raster tier the ladder continues with line bars and tiles, which is the regime neither of them addressed and where the overdraw shimmer Dobbie named as his open problem lives. The handoff between raster glyphs and line bars is the one open design question in this area.
+So big-text keeps Dobbie's architecture and puts Slug inside its vector tier: bands, the sign-classification rule, the two-ray box filter. The handoff to raster moved from Dobbie's fixed two texels per pixel to where the measurement put it, 12 pixels per line. Below the raster tier the ladder continues with line bars and tiles, the regime neither of them addressed, and the handoff between raster glyphs and line bars is the one open design question in this area.
 
 ## One framework, many corpora
 
-The presentation layer is corpus-blind. Every corpus that big-text intends to show bottoms out in one of three leaf payloads, and all of the expensive rendering lives in those:
+The presentation layer is corpus-blind. Every corpus big-text intends to show bottoms out in one of three leaf payloads, and all of the expensive rendering lives in those:
 
 | Leaf payload | Corpora | Renderers |
 |---|---|---|
@@ -57,21 +57,18 @@ The presentation layer is corpus-blind. Every corpus that big-text intends to sh
 | Images | photos and other large images, images in a PDF | big-picture's tile pyramid and virtual texturing |
 | 2D vectors | drawings in a PDF, layouts of a DXF | stroke and fill shaders with stroke level of detail from HEPR; [dxf-visual-spec](https://github.com/erik-larsen/dxf-visual-spec) supplies the DXF semantics |
 
-A page of War and Peace and a file of Rust are the same thing to the text renderers; a DXF and a PDF floorplan are the same thing to the path renderers. Adding a corpus costs no new shader. What differs per corpus is the middle of the ladder, and it is three functions, not a rendering algorithm: the hierarchy (folder tree, chapter and page, year and month, layer and block), the layout (treemap for code, reading order for a book, mosaic for photos, sheets for DXF), and the aggregate colour of a node too small to show its contents (token-kind mix, average colour, layer colour). A corpus adapter supplies those three; the ladder, camera, budget, hit testing and fly-overs are shared. Collections (many books, many repos, many drawings) are hierarchies with documents as internal nodes and need nothing new. Everything is flat: one 2D plane, one camera over it, with the 3D projection as a way of looking at that plane and not a third kind of content.
-
-The rule for keeping this honest: no adapter interface until three adapters exist. Code is built; a book is nearly the same adapter; photos are the real second one and DXF the third.
+A page of War and Peace and a file of Rust are the same thing to the text renderers; a DXF and a PDF floorplan are the same thing to the path renderers. Adding a corpus costs no new shader. What differs per corpus is three functions, not a rendering algorithm: the hierarchy (folder tree, chapter and page, year and month, layer and block), the layout (treemap for code, reading order for a book, mosaic for photos, sheets for DXF), and the aggregate colour of a node too small to show its contents (token-kind mix, average colour, layer colour). A corpus adapter supplies those three; the ladder, camera, budget, hit testing and fly-overs are shared. Collections of books, repositories or drawings are hierarchies with documents as internal nodes and need nothing new. Everything is flat: one 2D plane and one camera, the 3D projection being a way of looking at that plane rather than a third kind of content. No adapter interface gets written until three adapters exist: code is built, a book is nearly the same adapter, photos and DXF are the real second and third.
 
 ## Install
 
-1. Clone, and fetch the corpora you want. The submodules are corpora and references, not dependencies: `big-picture` is 19 files and enough to try everything, `makepad` adds 3.7 million lines for the full-size view, `dagcmp` and `hepr` are pinned for later phases and need not be fetched.
+1. Clone. The submodules are references and corpora, not dependencies: nothing is needed to run big-text on its own source, and `makepad` is the large corpus.
 
 ```bash
 git clone https://github.com/erik-larsen/big-text.git
 cd big-text
-git submodule update --init big-picture     # add makepad for the large corpus (300 MB)
 ```
 
-2. Python 3.12 with the packages in `requirements.txt`, in a virtual environment. numpy, Pillow, PyOpenGL, glfw and fontTools run everything but the resolver; tree-sitter and its Rust, Python and C grammars are for `atlas_resolve.py` only.
+2. Python 3.12 with the packages in `requirements.txt`, in a virtual environment. numpy, Pillow, PyOpenGL, glfw and fontTools run everything but the resolver; tree-sitter and its Rust, Python and C grammars serve `atlas_resolve.py` only.
 
 ```bash
 python3 -m venv .venv
@@ -79,32 +76,33 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-3. A GPU and driver with OpenGL 3.3 core: any Mac of the last decade, Linux with Mesa or vendor drivers. Developed and measured on macOS with an M4; Linux should work and is untested; Windows is untested. Nothing else is needed: the default face is bundled under `fonts/` with its OFL licence (`--font` takes any other TTF/TTC/OTF on `atlas_viewer.py` and `atlas_layout.py`), and git is used only by the history stage.
+3. A GPU and driver with OpenGL 3.3 core. Developed and measured on macOS with an M4; Linux with Mesa or vendor drivers should work and is untested; Windows is untested. The default face is bundled under `fonts/` with its OFL licence, and git is used only by the history stage.
 
-4. Check the install. The first test needs no window; the second opens a hidden one and compares the vector tier against Pillow.
+4. Check the install: the first test needs no window, the second opens a hidden one and compares the vector tier against Pillow.
 
 ```bash
 ./tests/test_history.py
 ./tests/test_vt_glyphs.py
 ```
 
-There is no build step: the scripts run in place, and the "build" is generating an atlas from a corpus, which is the first three commands of the next section.
+There is no build step. The scripts run in place, and the build is generating an atlas from a corpus, the first four commands below.
 
 ## Run
 
-Five steps: index a source tree, resolve its names, read its git history, lay it out, view it. Everything generated lands under `data/`, which git ignores, and each step is a script that prints what it did and how long it took. The resolve and history steps are optional; without resolve the filter is a plain word search and there is no Inspector, without history there are no colour lenses and no revision rail.
+Five steps: index a source tree, resolve its names, read its git history, lay it out, view it. Everything generated lands under `data/`, which git ignores, and every step prints what it did and how long it took. The resolve and history steps are optional: without resolve the filter is a plain word search and there is no Inspector, without history there are no colour lenses and no revision rail. The default example is big-text itself, 33 files and about 9,500 lines with this README among them, prepared in under a second:
 
 ```bash
-./atlas_index.py big-picture
-./atlas_resolve.py data/big-picture_atlas
-./atlas_history.py data/big-picture_atlas
-./atlas_layout.py data/big-picture_atlas
-./atlas_viewer.py data/big-picture_atlas
+./atlas_index.py . --out data/big-text_atlas
+./atlas_resolve.py data/big-text_atlas
+./atlas_history.py data/big-text_atlas
+./atlas_layout.py data/big-text_atlas
+./atlas_viewer.py data/big-text_atlas
 ```
 
-That is 19 files and 15,216 lines, indexed and laid out in well under a second. For something that looks like the video, index makepad's drawing and platform crates together, 493 files and 280,607 lines, or the whole makepad tree, 7,145 files and 3.67 million lines (4 seconds to index, 0.4 to lay out, 380 MB on the GPU):
+For scale, fetch makepad (300 MB) and index its drawing and platform crates together, 493 files and 280,607 lines, or the whole tree, 7,145 files and 3.67 million lines (4 seconds to index, 0.4 to lay out, 380 MB on the GPU):
 
 ```bash
+git submodule update --init makepad
 ./atlas_index.py makepad/draw makepad/platform --out data/makepad-draw_atlas
 ./atlas_resolve.py data/makepad-draw_atlas
 ./atlas_history.py data/makepad-draw_atlas
@@ -112,7 +110,7 @@ That is 19 files and 15,216 lines, indexed and laid out in well under a second. 
 ./atlas_viewer.py data/makepad-draw_atlas
 ```
 
-Glyphs from 12 device pixels per line come from the vector tier by default (crisp at any magnification; the first run builds its curve and band textures in a tenth of a second and caches them under `data/`); `--no-vector-text` keeps the raster atlas at every size. `--goto path:line`, `--zoom PX_PER_LINE`, `--filter WORD`, `--step K`, `--color churn|age|changes`, `--rev HASH`, `--compare HASH`, `--history`, `--frames N --screenshot out.png`, `--shots DIR` and `--stats` script the viewer for screenshots and timing; `docs/shots/README.md` lists the commands that made the images below.
+Glyphs from 12 device pixels per line come from the vector tier by default, crisp at any magnification; the first run builds its curve and band textures in a tenth of a second and caches them under `data/`, and `--no-vector-text` keeps the raster atlas at every size. `--goto path:line`, `--zoom PX_PER_LINE`, `--filter WORD`, `--step K`, `--color churn|age|changes`, `--rev HASH`, `--compare HASH`, `--history`, `--frames N --screenshot out.png`, `--shots DIR` and `--stats` script the viewer for screenshots and timing; `docs/shots/README.md` lists the commands that made every image here.
 
 ## Controls
 
@@ -126,14 +124,14 @@ Glyphs from 12 device pixels per line come from the vector tier by default (cris
 | Click a result | Fly to it |
 | Click a symbol at text zoom | Select it in the Inspector: kind, definition, scope, every reference |
 | `I` / `Tab` | Open or close the Inspector / switch between Inspector and Results |
-| Toolbar or `M` | Switch the area metric: Tokens, References, Lines (a hard cut to another layout) |
+| Toolbar or `M` | Switch the area metric: Tokens, References, Churn, Lines (a hard cut to another layout) |
 | `3D` button or `3` | The tilted projection: files and directories extruded by the current metric |
 | `Layers` button | The Layers lens: files in rows by dependency rank, cycles grouped, hue kept from the tree |
 | Click a file | Select it: its neighbours in the file graph light up in teal, the rest dim, the Inspector lists uses and used-by |
 | `Shift` + click / `Shift` + drag | Toggle a file in the selection / select every file in a rectangle |
 | `Alt` + drag | Tilt (vertical) and turn (horizontal) the 3D camera; from 2D it switches to 3D |
 | Toolbar or `C` | Cycle the colour lens: None, Churn (lines added and removed, ember), Age (time since the last commit, teal), Changes (added green, changed amber, against the compare revision) |
-| `H` or the `History` button | Show the revision rail along the bottom: one tick per commit, oldest left. Click loads the corpus at that commit (re-indexed in a thread, cached on disk, a hard cut when ready); `Shift` + click sets the compare revision; `Left` / `Right` step by one commit, with `Shift` the compare revision |
+| `H` or the `History` button | Show the revision rail along the bottom, one tick per commit, oldest left. Click loads the corpus at that commit (re-indexed in a thread, cached on disk, a hard cut when ready); `Shift` + click sets the compare revision; `Left` / `Right` step by one commit, with `Shift` the compare revision |
 | `R` | Refit the map |
 | `Escape` | Clear the filter, then the selection |
 
@@ -147,28 +145,28 @@ The same corpus with the filter `Window`: 31 files outlined in yellow at the ove
 
 ![makepad-draw filter](docs/shots/makepad-draw/filter.png)
 
-big-picture's own source at the four rungs, from the fitted map through 2, 4.5 and 16 device pixels per line: bars, token blocks with item outlines, then text.
+big-text's own source at the four rungs, from the fitted map through 2, 4.5 and 16 device pixels per line: bars, token blocks with item outlines, then text.
 
-![big-picture overview](docs/shots/big-picture/overview.png)
-![big-picture bars](docs/shots/big-picture/bars.png)
-![big-picture tokens](docs/shots/big-picture/tokens.png)
-![big-picture text](docs/shots/big-picture/text.png)
+![big-text overview](docs/shots/big-text/overview.png)
+![big-text bars](docs/shots/big-text/bars.png)
+![big-text tokens](docs/shots/big-text/tokens.png)
+![big-text text](docs/shots/big-text/text.png)
 
-The same corpus laid out by references instead of tokens (the toolbar's second metric): the files everything depends on grow, the generated bindings shrink.
+makepad-draw laid out by references instead of tokens: the files everything depends on grow, the generated bindings shrink.
 
 ![references layout](docs/shots/makepad-draw/references.png)
 
-The 3D projection over the references layout: the cores of the codebase as the tallest buildings, directories as terraces, the ladder still drawn on every roof so the near rows are text and the far rows are bars. Alt-drag tilts and turns it.
+The 3D projection over the references layout: the cores of the codebase as the tallest buildings, directories as terraces, the ladder still drawn on every roof so the near rows are text and the far rows are bars.
 
 ![3D city](docs/shots/makepad-draw/3d.png)
 ![3D close](docs/shots/makepad-draw/3d_zoom.png)
 ![3D text](docs/shots/makepad-draw/3d_text.png)
 
-A long line wrapped inside its column at text zoom, the continuation rows hanging in by two characters (the credits block of stb_image.h).
+A long line wrapped inside its column at text zoom, the continuation rows hanging in by two characters: this README's opening paragraph.
 
-![wrapped lines](docs/shots/big-picture/wrapped.png)
+![wrapped lines](docs/shots/big-text/wrapped.png)
 
-The Layers lens: every file in a row by its dependency rank, highest on top, the strongly connected component of 355 mutually referencing platform files grouped as one cycle; and a selection of the x11 bindings lighting the 224 files that use them.
+The Layers lens on makepad-draw: every file in a row by its dependency rank, highest on top, the strongly connected component of 355 mutually referencing platform files grouped as one cycle; and a selection of the x11 bindings lighting the 224 files that use them.
 
 ![layers lens](docs/shots/makepad-draw/layers.png)
 ![selection](docs/shots/makepad-draw/selection.png)
@@ -178,22 +176,22 @@ The resolver's view of makepad-draw: hovering `Window` in the x11 bindings, and 
 ![symbol hover](docs/shots/makepad-draw/hover_symbol.png)
 ![inspector](docs/shots/makepad-draw/inspector.png)
 
-Filter and fly-to on big-picture: the hit file outlined and the panel listing the definition, then the view after stepping to the first result.
+Filter and fly-to on big-text: the files defining or using `Viewer` outlined and the panel listing them, then the view after stepping to the first result.
 
-![big-picture filter](docs/shots/big-picture/filter.png)
-![big-picture result](docs/shots/big-picture/result.png)
+![big-text filter](docs/shots/big-text/filter.png)
+![big-text result](docs/shots/big-text/result.png)
 
 The two glyph tiers at 120 pixels per line: the 64 pixel raster atlas magnified (left) and the vector tier (right).
 
-![raster glyphs at 120 px](docs/shots/big-picture/text_120_raster.png)
-![vector glyphs at 120 px](docs/shots/big-picture/text_120_vector.png)
+![raster glyphs at 120 px](docs/shots/big-text/text_120_raster.png)
+![vector glyphs at 120 px](docs/shots/big-text/text_120_vector.png)
 
 The colour lenses over the fitted map: churn (lines added and removed over the whole history, log scale, in ember) and age (rank by last commit, newest in teal). The bars and glyphs are untouched; only the file fill carries the lens.
 
 ![churn lens](docs/shots/makepad-draw/churn.png)
 ![age lens](docs/shots/makepad-draw/age.png)
 
-Changes between the commit 100 back and HEAD, with the revision rail along the bottom: 78 files added in green, 203 changed in amber by the fraction of their lines touched, the two revisions tagged on the rail, and the status line carrying the counts, which equal `git diff --name-status` between the two.
+Changes between the commit 100 back and HEAD, with the revision rail along the bottom: 78 files added in green, 203 changed in amber by the fraction of their lines touched, the two revisions tagged on the rail, and the counts in the status line, which equal `git diff --name-status` between the two.
 
 ![changes lens](docs/shots/makepad-draw/changes.png)
 
@@ -207,23 +205,23 @@ A file selected with the Changes lens on: the Inspector shows its commits, dates
 
 ## Implementation
 
-The contract that the code was built against is [docs/DESIGN.md](docs/DESIGN.md), including the deviations found while building. The short version:
+The contract the code was built against is [docs/DESIGN.md](docs/DESIGN.md), with the deviations found while building. The short version:
 
-- **Index.** `atlas_index.py` walks the tree (honouring `.gitignore`, skipping binaries), expands tabs, maps every character to one column, and runs a small regex tokenizer per language family (Rust, C-like, Python, shell, plain) that assigns one of ten kinds to every character. Items (functions, structs, enums, impls, modules) come from regexes with brace or indentation matching. Output is a handful of numpy arrays: the characters, their kinds, line offsets, file ranges, item ranges.
-- **The window.** The map's viewport is the window minus a top strip (toolbar, and the filter box while the panel is closed), a bottom strip (crumb trail, status, and the revision rail when shown) and the right column while the results panel is open; the fitted map is clear of every control. The window is sized to the screen's work area explicitly so the framebuffer is the same in every run and screenshots are reproducible.
-- **Layout.** `atlas_layout.py` is a squarified treemap over the directory tree with padding per level that the viewer draws as the directory band, so the bands widen as you zoom. It writes one layout per metric: tokens (the default, as in the video's toolbar), references from the resolver's fan-in, and lines; the viewer loads them all and the toolbar or `M` switches with a hard cut, the world staying the same size so the camera does not move. Each file is wrapped into as many equal columns as keep about a 90th-percentile line width readable, at a pitch that fits its rows; lines longer than a column wrap inside it, continuation rows hanging in by two characters, with the pitch and capacity iterated to a fixed point (columns under 16 characters clip instead). A preview PNG and `tests/check_layout.py` check the invariants.
-- **The ladder.** Per frame the viewer computes device pixels per line for every file and picks a rung: under 1, sampled one-pixel bars; 1 to 3, one grey bar per line from indent to length; 3 to 6, one block per character in its kind colour, plus item outlines; 6 and up, glyphs. Below 3 px the items are also drawn as filled bands in their kind colour under the bars, Rik's kind-bands representation, and from 3 px the outlines take over. The switches are hard cuts, as in the video. Everything is resident: characters and kinds as 8-bit textures, lines and files as float and integer textures, one instanced quad per line drawn per run of visible files, the border ring drawn again after the text.
-- **Glyphs.** `atlas_font.py` rasterises the 95 printable ASCII glyphs of one monospace face into a mipmapped atlas that also draws the UI; the line box is the face's ASCII ink extents, so Menlo and JetBrains Mono come out at the same 1.05 em and 0.571 aspect. `vt_glyphs.py` builds the vector tier's data in Slug's form: quadratic outlines from fontTools as float32 control points in a curve texture, and per glyph horizontal and vertical bands over its ink box, each listing the curves that cross it sorted for the shader's early exit. `shaders/vt_glyph.glsl` is a GLSL translation of the MIT reference pixel shader: the sign-bit root rule, two axis rays with a box filter, the weighted combination. The measurement that chose it over the Dobbie port, and set the handoff to the raster tier, is in the table below.
-- **Resolver.** `atlas_resolve.py` parses every file with tree-sitter and collects entities (functions, methods, structs, fields, enums, variants, traits, type aliases, consts, statics, modules, macros, type parameters, parameters, locals) and every identifier use. Each use is resolved lexically, in order: the enclosing function's locals, the file, the file's `use` imports through the crate found by its Cargo.toml, a unique name in the crate, a unique name in the corpus, with type parameters, `Self`, enum paths and `Type::method` handled along the way; what is left is ambiguous, external (a crate not in the corpus), missing import, missing macro or not found, and the counts of each are the Inspector's coverage block. No type inference, so a method after a dot with several candidates is "method dispatch", the same category Rik's analyser reports. Rust is covered fully; Python and C get functions, types, parameters and locals. All of makepad resolves in 25 seconds on ten cores: 864k entities and 4.7 million references, 64 percent of them resolved, across 317 crates; Rik's Inspector reports 722k entities and 1.3 million edges for the same tree, so the scale matches even though the rules do not.
-- **Filter.** A word that names an entity lists its definitions with their kinds and every reference with its status; any other word is a whole-word regex over the corpus in a thread, chunked so the frame loop keeps running, with mentions inside comments and strings excluded. `Window` in makepad-draw finds 2 definitions (the x11 type alias and an enum variant) and 152 references, 91 of them resolved to one or the other; Rik's analyser reports 119 and 1472 for all of makepad.
+- **Index.** `atlas_index.py` walks the tree (honouring `.gitignore`, skipping binaries and submodules), expands tabs, maps every character to one column, and runs a small regex tokenizer per language family (Rust, C-like, Python, shell, plain) that gives every character one of ten kinds. Items (functions, structs, enums, impls, modules) come from regexes with brace or indentation matching. The output is a handful of numpy arrays: characters, kinds, line offsets, file ranges, item ranges.
+- **Layout.** `atlas_layout.py` is a squarified treemap over the directory tree with padding per level, which the viewer draws as the directory band, so the bands widen as you zoom. It writes one layout per metric (tokens, references from the resolver's fan-in, churn, lines) and the toolbar switches between them with a hard cut, the world staying the same size so the camera does not move. Each file is wrapped into as many equal columns as keep a 90th-percentile line width readable; lines longer than a column wrap inside it, continuation rows hanging in by two characters. `tests/check_layout.py` checks the invariants.
+- **The ladder.** Per frame the viewer computes device pixels per line for every file and picks a rung: under 1, sampled one-pixel bars; 1 to 3, one grey bar per line from indent to length, with items as filled bands in their kind colour beneath; 3 to 6, one block per character in its kind colour plus item outlines; 6 and up, glyphs. The switches are hard cuts, as in the video. Everything is resident: characters and kinds as 8-bit textures, lines and files as float and integer textures, one instanced quad per line drawn per run of visible files.
+- **Glyphs.** `atlas_font.py` rasterises the 95 printable ASCII glyphs of one monospace face into a mipmapped atlas that also draws the UI; the line box is the face's ASCII ink extents, so Menlo and JetBrains Mono come out at the same 1.05 em and 0.571 aspect. `vt_glyphs.py` builds the vector tier's data in Slug's form: quadratic outlines from fontTools as float32 control points in a curve texture, and per glyph horizontal and vertical bands over its ink box, each listing the curves that cross it sorted for the shader's early exit. `shaders/vt_glyph.glsl` is a GLSL translation of the reference pixel shader: the sign-bit root rule, two axis rays with a box filter, the weighted combination.
+- **Resolver.** `atlas_resolve.py` parses every file with tree-sitter and collects entities (functions, methods, structs, fields, enums, variants, traits, type aliases, consts, statics, modules, macros, type parameters, parameters, locals) and every identifier use. Each use is resolved lexically, in order: the enclosing function's locals, the file, the file's `use` imports through the crate found by its Cargo.toml, a unique name in the crate, a unique name in the corpus; what is left is ambiguous, external, missing import, missing macro or not found, and the counts of each are the Inspector's coverage block. No type inference, so a method after a dot with several candidates is "method dispatch", the same category Rik's analyser reports. Rust is covered fully; Python and C get functions, types, parameters and locals. All of makepad resolves in 25 seconds on ten cores: 864k entities and 4.7 million references, 64 percent of them resolved, across 317 crates; Rik's Inspector reports 722k entities and 1.3 million edges for the same tree, so the scale matches even though the rules do not.
+- **Filter.** A word that names an entity lists its definitions with their kinds and every reference with its status; any other word is a whole-word regex over the corpus in a thread, chunked so the frame loop keeps running, with mentions inside comments and strings excluded. `Window` in makepad-draw finds 2 definitions and 152 references, 91 of them resolved; Rik's analyser reports 119 and 1472 for all of makepad.
 - **Fly-to** is van Wijk and Nuij's smooth zoom-and-pan, which zooms out and back in between distant places.
-- **Layers and selection.** The resolver's references give a file graph, A to B when a reference in A resolves into B. The Layers lens runs Tarjan on it, condenses the cycles, ranks each component by its longest path down to a file that references nothing in the corpus, and lays the ranks out as rows (highest on top, heights by weight to the 0.6 so a giant cycle does not squeeze the others), cycles as groups inside their row and files keeping the hue of their real directory; the crumb trail reads "layer 3 · 355 files › cycle". A click selects a file, Shift-click toggles, Shift-drag marquees; the selection's neighbourhood (both directions) is lit in teal, everything else dims, and the Inspector lists the selected files with their in and out degrees, then the files they use and the files that use them.
-- **3D.** Every world shader takes one model-view-projection matrix, orthographic in 2D and perspective in 3D, so the flat view is unchanged. In 3D the camera orbits a focus point at tilt and yaw, at a distance chosen so one world unit at the focus is still the same number of pixels as in 2D, which keeps the zoom semantics and the per-file rung: a file's pixels per line is foreshortened by its depth, so one frame has text near and bars far. Directories are terraces of five world units per level, files rise from their terrace by the square root of the current metric, an instanced wall pass draws the four sides of every rectangle shaded by which way they face, and the focus height rides on the roof of the file under the centre so a close camera never ends up inside a building. Picking unprojects the cursor onto that roof; labels are billboards at projected corners.
-- **History.** `atlas_history.py` runs one `git log --numstat` over the indexed directories (half a second for the 724 commits touching makepad's draw and platform crates) and writes per-file commit counts, lines added and removed, first and last commit times, and a per-revision table of the files each commit touched, so everything windowed is computed in the viewer without calling git. Renames are not followed; a rename is a removal and an addition. Churn becomes a fourth area metric, so it also drives the 3D heights. The colour lenses tint the file fill only, so the ladder reads the same at every rung: churn on a log scale in ember, age in teal, and changes between the loaded revision and a compare revision picked on the rail, added files green and changed files amber by the fraction of their lines touched, removed files counted in the status line and listed in the Inspector because they have no rectangle to light. The rail loads a revision by extracting it with `git archive`, indexing and laying it out with the tokens metric into a cache under the atlas, then swapping every GPU texture; the world is the same size so the camera stays, the filter re-runs, the selection clears. A past revision arrives with the tokens layout first and gets its resolver and other layouts in the background a second or two later, without a camera move, so its metric buttons, Layers lens and entity views come alive; only the churn metric stays HEAD's. The Inspector gains a History block per selected file: commits, first and last dates, lines added and removed, the newest five commits.
+- **Layers and selection.** The resolver's references give a file graph, A to B when a reference in A resolves into B. The Layers lens runs Tarjan on it, condenses the cycles, ranks each component by its longest path down to a file that references nothing in the corpus, and lays the ranks out as rows, cycles as groups inside their row, files keeping the hue of their real directory. A click selects a file, Shift-click toggles, Shift-drag marquees; the selection's neighbourhood in both directions is lit in teal, everything else dims, and the Inspector lists the selected files with their degrees, then the files they use and the files that use them.
+- **3D.** Every world shader takes one model-view-projection matrix, orthographic in 2D and perspective in 3D, so the flat view is unchanged. The camera orbits a focus point at tilt and yaw, at a distance chosen so one world unit at the focus is the same number of pixels as in 2D, which keeps the zoom semantics and the per-file rung: a file's pixels per line is foreshortened by its depth, so one frame has text near and bars far. Directories are terraces, files rise from their terrace by the square root of the current metric, an instanced wall pass draws the sides shaded by which way they face, and the focus height rides on the roof of the file under the centre so a close camera never ends up inside a building.
+- **History.** `atlas_history.py` runs one `git log --numstat` over the indexed directories (half a second for the 689 commits touching makepad's draw and platform crates) and writes per-file commit counts, lines added and removed, first and last commit times, and a per-revision table of the files each commit touched, so everything windowed is computed in the viewer without calling git; a rename counts as a removal and an addition. Churn is a fourth area metric, so it also drives the 3D heights. The colour lenses tint the file fill only: churn on a log scale in ember, age in teal, and changes between the loaded revision and a compare revision picked on the rail, added files green and changed files amber by the fraction of their lines touched, removed files counted in the status line and listed in the Inspector since they have no rectangle to light. The rail loads a revision by extracting it with `git archive`, indexing and laying it out into a cache under the atlas, then swapping every GPU texture with the camera kept; its resolver and other layouts follow in the background a second or two later. The Inspector shows each selected file's commits, dates, lines added and removed and newest five commits.
+- **The window.** The map's viewport is the window minus a top strip (toolbar and filter box), a bottom strip (crumb trail, status, and the revision rail when shown) and the right column while the results panel is open, so the fitted map is clear of every control. The window is sized to the screen's work area explicitly, which makes the framebuffer the same in every run and the screenshots reproducible.
 
-Measured on an M4 MacBook at a 2940 by 1640 framebuffer, `--frames 300 --stats` over the scripted zoom from fit to text: big-picture 1.2 ms mean and 3.4 ms 99th percentile; makepad-draw 1.6 and 4.4 ms, or 2.1 and 6.3 with the churn lens and the rail; the full makepad tree 4.5 and 23.7 ms, the tail being the fitted view where all 3.67 million lines are visible, and 1.3 ms once zoomed to text. A past revision of makepad-draw loads in 0.8 s from scratch and instantly from the cache.
+Measured on an M4 MacBook at a 2940 by 1640 framebuffer, `--frames 300 --stats` over the scripted zoom from fit to text: makepad-draw 1.6 ms mean and 4.4 ms 99th percentile, or 2.1 and 6.3 with the churn lens and the rail; the full makepad tree 4.5 and 23.7 ms, the tail being the fitted view where all 3.67 million lines are visible, and 1.3 ms once zoomed to text. A past revision of makepad-draw loads in 0.8 s from scratch and instantly from the cache.
 
-The vector tier was measured by `tests/bench_vt.py` before the Dobbie port was deleted, and before the history rewrite removed it from git as well: the Slug tier, the port (taken from git at the time), and the raster tier (the 64 px mipmapped atlas sampled as the text rung samples it), on the bundled face, against the exact coverage of the same string (Pillow at eight times the size, box-filtered down; a hinted reference at the target size favours the raster tier, which is itself a Pillow render). Error is the mean absolute coverage difference over the whole image and over ink pixels; time is one full 2940 by 1640 screen of glyph cells, the best of five batches of fifty draws; sparkle is the number of pixels whose coverage jumps by more than a quarter between neighbouring sub-pixel offsets 0.1 px apart, which a one-pixel box filter cannot do on an edge.
+The vector tier was measured by `tests/bench_vt.py` before the Dobbie port was deleted: the Slug tier, the port, and the raster tier (the 64 px mipmapped atlas sampled as the text rung samples it), on the bundled face, against the exact coverage of the same string (Pillow at eight times the size, box-filtered down; a hinted reference at the target size favours the raster tier, which is itself a Pillow render). Error is the mean absolute coverage difference over the whole image and over ink pixels; time is one full 2940 by 1640 screen of glyph cells, the best of five batches of fifty draws; sparkle is the number of pixels whose coverage jumps by more than a quarter between neighbouring sub-pixel offsets 0.1 px apart, which a one-pixel box filter cannot do on an edge.
 
 | px per line | tier | error, all | error, ink | ms per screen | cells per screen | sparkle mean | sparkle max |
 |---|---|---|---|---|---|---|---|
@@ -240,43 +238,38 @@ The vector tier was measured by `tests/bench_vt.py` before the Dobbie port was d
 | 300 | grid | 0.0012 | 0.0087 | 0.05 | 85 | 1059.0 | 2118 |
 | 300 | raster | 0.0212 | 0.1216 | 0.07 | 85 | 1.3 | 13 |
 
-A rerun of the harness today measures the Slug and raster tiers only, since the port no longer exists anywhere; the grid rows above are the phase 6 numbers. Slug halves the port's error at every size and has ten to forty times fewer sparkles; against the raster tier its error is lower even at 12 px, so the handoff `VT_MIN_PPL` is 12 px per line and the raster atlas serves only the 6 to 12 px band of the text rung. It costs 7 to 18 percent more time than the port, one or two hundredths of a millisecond per full screen, accepted for the accuracy and the licence. Vector text is on by default because at 12 px it takes 0.48 ms per screen against the raster tier's 0.24, exactly the rule's factor of two; `--no-vector-text` turns it off. ![the three tiers at 12 px](docs/shots/vt_bench_12.png) ![the three tiers at 96 px](docs/shots/vt_bench_96.png)
+Slug halves the port's error at every size and has ten to forty times fewer sparkles; against the raster tier its error is lower even at 12 px, so the handoff `VT_MIN_PPL` is 12 px per line and the raster atlas serves only the 6 to 12 px band of the text rung. It costs 7 to 18 percent more time than the port, one or two hundredths of a millisecond per full screen, accepted for the accuracy and the licence. Vector text is on by default because at 12 px it takes 0.48 ms per screen against the raster tier's 0.24, the rule's factor of two exactly. The harness now measures the Slug and raster tiers only, the port being gone; the grid rows are its last measurement.
 
-Not built: the palette and legend buttons, and a streaming working set (the whole corpus is resident, which is fine to a few million lines).
+![the three tiers at 12 px](docs/shots/vt_bench_12.png)
+![the three tiers at 96 px](docs/shots/vt_bench_96.png)
 
-## Decisions so far
+Not built: the palette and legend buttons, and a streaming working set; the whole corpus is resident, which is fine to a few million lines.
 
-The six questions below were settled on 2026-09-12 for the first build, and the answers with the module contracts are in [docs/DESIGN.md](docs/DESIGN.md): a source tree as the corpus; a raster glyph atlas as the text rung with a Dobbie-style vector tier as an optional module; our own atlas generators with Pillow and fontTools; Python with OpenGL 3.3, GLES-compatible shaders, big-picture's conventions; no pyramid, the ladder is drawn from instance data; everything resident on the GPU, streaming later. Phases 0 to 6 of [docs/PARITY.md](docs/PARITY.md) built that and what followed: the ladder, the resolver and Inspector, wrapping and metric layouts, 3D, the Layers lens and selection, History, and the vector tier on Slug. The questions below carry their current answers.
+## Open questions
 
-## Questions to settle
+The settled decisions and their reasons are in [docs/DESIGN.md](docs/DESIGN.md); the phase plan and what each phase closed are in [docs/PARITY.md](docs/PARITY.md). Still open:
 
-1. Corpus and layout. Answered for code, and the shape for the rest is in "One framework, many corpora": a document is a rectangle with lines, a directory is a rectangle of documents, and a corpus adapter supplies the hierarchy, the layout and the aggregate colour. Still open: which corpus is second. A book is nearly the code adapter (pages as files, reading order as the layout). Photos exercise the raster payload and big-picture's pyramid, and are the first real test of the adapter split. A dagcmp volume is the largest hierarchy with the least text. Proposal: book, then photos, then DXF, and no adapter interface until the third.
-2. The glyph tier. Answered in phase 6: Dobbie's two tiers with Slug inside the vector one. Bands with sorted curve lists replaced the grid, the sign-classification rule replaced the t-range check, two axis rays with a box filter replaced four rotated rays with a parabolic one. The vertex-shader dilation did not apply, since glyphs are drawn inside the layout's fixed cells. The measurement is in the Implementation section: error halved, sparkle down by an order of magnitude or more, time up by a tenth.
-3. Atlas generation. Answered: `vt_glyphs.py` exists and is the preprocessor Dobbie never published, for one monospace face and ASCII. Open: Unicode coverage and proportional faces for books, cubic outlines converted rather than subdivided, and a browser-side build so a public viewer can take any font.
-4. Platform. Python with OpenGL 3.3 for the prototype, as built. The browser is the target, and the contract for getting there is not the Python code but the files and the shaders: every generated `.npz` gets a documented binary layout, and every shader stays within what GLSL ES 3.0 can express (texelFetch and integer samplers are in, geometry shaders and bindless are out), so a WebGL2 viewer reads the same atlases and links the same shaders. WebGPU later, from the same data.
-5. Do we keep a pyramid at all? Answered for code: no, the ladder is drawn from instance data. Reopened by photos: the raster payload is a pyramid by nature, so the adapter split has to let one corpus stream tiles while another draws instances.
-6. Budget and eviction. Still open, and now phase 6. The unit is per-file instance ranges under a byte budget for text, and big-picture's pages for raster; whether one budget covers both is the question.
-7. The two handoffs. Vector to raster was measured in phase 6: the vector tier's error is below the raster tier's at every tested size down to 12 px per line, so the handoff sits there and the raster atlas covers only the text rung's 6 to 12 px. Raster glyphs to line bars, where a pixel starts to cover several glyphs and per-glyph quads overdraw: a hard cut at a pixels-per-line threshold as today, a blend, or whole lines cached as texture rows first. This is the one place the ladder is not yet designed, and it is the same problem in all three payloads.
+1. **The next corpus.** A book is nearly the code adapter (pages as files, reading order as the layout); photos exercise the image payload and big-picture's pyramid and are the first real test of the adapter split; a dagcmp volume is the largest hierarchy with the least text. Proposal: book, then photos, then DXF.
+2. **Fonts beyond ASCII monospace.** Unicode coverage and proportional faces for books, and a serif face chosen from the OFL families with quadratic outlines (Literata, Libertinus Serif) when the book corpus starts.
+3. **The browser.** Python with OpenGL 3.3 is the prototype; the browser is the target. The contract for getting there is the files and the shaders, not the Python: every generated `.npz` gets a documented binary layout, and every shader stays within GLSL ES 3.0 (texelFetch and integer samplers in, geometry shaders and bindless out), so a WebGL2 viewer reads the same atlases and links the same shaders. WebGPU later, from the same data.
+4. **Budget and eviction.** Per-file instance ranges under a byte budget for text and big-picture's pages for images; whether one budget covers both. Built only once a corpus needs it.
+5. **The handoff from raster glyphs to line bars.** Where a pixel starts to cover several glyphs and per-glyph quads overdraw: a hard cut at a pixels-per-line threshold as today, a blend, or whole lines cached as texture rows first. The one place the ladder is not yet designed, and the same problem in all three payloads.
 
 ## Copyright path
 
-Everything big-text writes is MIT ([LICENSE](LICENSE), Erik Larsen). Everything it reuses is listed here with its licence and the exact way it is reused, so that the public repo is clean by construction rather than by audit. Four ways of reusing appear in the table: pin (a submodule at a commit, the upstream licence applies inside it), translate (code copied or ported with the upstream notice kept), reimplement (only the published description is used, no code), and fetch (downloaded by a test at run time, never committed).
+Everything big-text writes is MIT ([LICENSE](LICENSE), Erik Larsen). Everything it reuses is listed here with its licence and the way it is reused, so that the public repository is clean by construction rather than by audit: pin (a submodule at a commit, the upstream licence applying inside it), translate (code ported with the upstream notice kept), or reimplement (only the published description used, no code).
 
-| Part | Author, licence | How it is reused | Status |
-|---|---|---|---|
-| big-picture, dagcmp | Erik Larsen, MIT | pin | done |
-| makepad (public engine) | makepad, MIT or Apache-2.0 | pin at a2fdeb325 (dev, 2026-09-11); the code atlas is reimplemented from the video and commit messages, its private crates are not used | done |
-| Slug shaders | Eric Lengyel, MIT ([EricLengyel/Slug](https://github.com/EricLengyel/Slug)); the algorithm's patent US 10,373,352 dedicated to the public domain 2026-03-17 | translated to GLSL in `shaders/vt_glyph.glsl` with the notice there and in THIRD_PARTY_NOTICES; the 2017 JCGT supplemental GLSL is under the journal's terms and is not used | done |
-| HEPR | soadzoor, MIT | pin at c81c326 (0.1.29, 2026-09-08) as a reference; translate stroke and fill shaders with the notice and its third-party notices carried forward when the vector work starts. Fork only on the day there is a change to send upstream, and repoint the submodule then | pinned; translation later |
-| Dobbie's technique, formats and tiers | Will Dobbie, 2016, blog posts | reimplement: `vt_glyphs.py` builds his atlas format from his description | done, with one review pass for structural copying still owed |
-| Dobbie's shaders | Will Dobbie, no licence published | the port of his `font.frag` that `shaders/vt_glyph.glsl` used to be was deleted in phase 6 and replaced by the Slug translation; `git grep -i dobbie shaders/` finds nothing, and the history was rewritten to drop the port's blob | done |
-| Dobbie's demo files (HTML, shaders, atlas, vertex buffers, page tables) | Will Dobbie, no licence published | not used: the demos live on his site, the history was rewritten to drop the ten small files that were once committed, and the study directory that fetched them was removed once nothing needed it | done |
-| Default font | JetBrains, OFL 1.1 | pin: `fonts/JetBrainsMonoNL-Regular.ttf` with `fonts/OFL.txt` and `fonts/AUTHORS.txt`; the OFL allows bundling and embedding, and the atlases the viewer builds from it are embeddings | done |
-| War and Peace | Leo Tolstoy, Maude translation, public domain via Project Gutenberg | the book corpus, laid out by big-text itself; none of Dobbie's page data is used | later |
+| Part | Author, licence | How it is reused |
+|---|---|---|
+| big-picture, dagcmp | Erik Larsen, MIT | pin |
+| makepad (public engine) | makepad, MIT or Apache-2.0 | pin at a2fdeb325; the code atlas is reimplemented from the video and the commit messages, its private crates are not used |
+| Slug | Eric Lengyel, MIT or Apache-2.0; patent US 10,373,352 dedicated to the public domain 2026-03-17 | pin at be3c13e; the pixel shader translated to GLSL in `shaders/vt_glyph.glsl` with the notice there and in [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES). The 2017 JCGT supplemental GLSL is under the journal's terms and is not used |
+| HEPR | soadzoor, MIT | pin at c81c326 (0.1.29); its stroke and fill shaders will be translated with their notices when the vector work starts |
+| Dobbie's technique, formats and tiers | Will Dobbie, 2016, blog posts, no licence published | reimplement from the posts. No code or data of his is in the repository or its history: a port of his shader and copies of his demo files were in early commits, and the history was rewritten with `git filter-repo` before publication to remove them, then the GitHub repository recreated so no pre-rewrite object remains |
+| JetBrains Mono NL | JetBrains, OFL 1.1 | pin: `fonts/JetBrainsMonoNL-Regular.ttf` with `fonts/OFL.txt` and `fonts/AUTHORS.txt`; the atlases the viewer builds from it are embeddings in the OFL's sense |
+| War and Peace | Leo Tolstoy, Maude translation, public domain via Project Gutenberg | the book corpus, laid out by big-text itself, when that corpus starts |
 
-No licence has been published for Dobbie's work, on the blog or with the files, and silence is not permission. The technique, the formats and the tier design are ideas and are free to reimplement, which is what GreenLightning, gllabel and HEPR did with credit; the code and the data are his copyright and never ship here. The working tree has been clean since phase 6, and on 2026-09-12 the history was rewritten with `git filter-repo` before publication: the ten demo files are gone from every commit, and the blob of the shader port in the commits between phases 3 and 6 was replaced by a three-line note saying what was removed and why. The current tree is byte-identical to before the rewrite. Nothing of Dobbie's remains in the repository or its history, and nothing in it needs his files: his posts are the reference.
-
-The font decision: Menlo is Apple's and cannot be redistributed, so the default face becomes JetBrains Mono NL (no ligatures), Regular. It is OFL 1.1, ships as TrueType with quadratic outlines so the vector tier converts nothing, has a 0.6 em advance which is already the layout's fallback width metric, and reads well at the small sizes the ladder spends most of its time at. Its OS/2 line box is 1.32 em where Menlo's is 1.06, which would have shrunk every glyph by a fifth at the same pixels per line; the line box is therefore defined as the face's ASCII ink extents, which are 1.050 em for JetBrains Mono and 1.054 for Menlo with the same 0.571 character aspect, so the layouts do not move. DejaVu Sans Mono is Menlo's ancestor, but its Bitstream Vera licence is not OFL; it stays a `--font` option. A serif face for the book corpus is chosen when that corpus starts, from the OFL families with quadratic outlines and full Latin coverage (Literata, Libertinus Serif). `--font` keeps working for any face on the machine; nothing generated from a font is committed.
+The font: Menlo is Apple's and cannot be redistributed, so the default face is JetBrains Mono NL Regular, which is OFL, TrueType with quadratic outlines so the vector tier converts nothing, and legible at the small sizes the ladder spends most of its time at. Its OS/2 line box is 1.32 em where Menlo's is 1.06, which would have shrunk every glyph by a fifth at the same pixels per line, so the line box is defined as the face's ASCII ink extents, 1.050 em for JetBrains Mono and 1.054 for Menlo with the same 0.571 character aspect, and the layouts did not move. `--font` takes any face on the machine; nothing generated from a font is committed.
 
 ## Layout
 
@@ -284,24 +277,21 @@ The font decision: Menlo is Apple's and cannot be redistributed, so the default 
 big-text/
   README.md                    this file
   requirements.txt             the Python packages (pip install -r)
-  docs/DESIGN.md               the build contract and its deviations
+  LICENSE, THIRD_PARTY_NOTICES MIT for big-text; what is reused from whom, and how
+  docs/DESIGN.md               the build contract, phase by phase, with the as-built deviations
+  docs/PARITY.md               the checklist against the makepad video, the phase plan, where things stand
   docs/shots/                  screenshots and the commands that made them
   notes/makepad-code-atlas.md  what the public makepad history and the video say about the code atlas
   atlas_index.py               source tree -> data/<name>_atlas/index.npz + index.json
   atlas_resolve.py             tree-sitter entities and lexically resolved references -> resolve.npz + resolve.json
   atlas_history.py             git log --numstat over the indexed directories -> history.npz + history.json
-  atlas_layout.py              index -> layout.npz (tokens), layout_references.npz, layout_churn.npz, layout_lines.npz, layout_layers.npz (+ --preview PNG)
+  atlas_layout.py              index -> layout.npz (tokens), layout_references.npz, layout_churn.npz, layout_lines.npz, layout_layers.npz
   atlas_font.py                monospace font -> raster glyph atlas
-  atlas_viewer.py              the viewer
   vt_glyphs.py                 the vector glyph tier's curve and band textures (Slug's form)
+  atlas_viewer.py              the viewer
   shaders/                     GLSL 330, one file per program (dir, file, line, rect, text, wall, vt_glyph)
-  tests/                       layout invariants, viewer input, vector glyph accuracy and the tier measurement (bench_vt.py), a synthetic atlas, history (a throwaway repo, and the rail driven by synthetic input)
-  fonts/                       the default face, JetBrains Mono NL, with its OFL licence
-  THIRD_PARTY_NOTICES          what is reused from whom, and how
+  tests/                       layout invariants, viewer input and history driven by synthetic input, vector glyph accuracy, the tier measurement (bench_vt.py), a throwaway-repo history test
+  fonts/                       JetBrains Mono NL with its OFL licence
   data/                        generated atlases and glyph caches (gitignored)
-  big-picture/                 submodule, pinned
-  dagcmp/                      submodule, pinned
-  makepad/                     submodule, pinned
-  hepr/                        submodule, pinned (HEPR, the 2D vector lineage)
+  big-picture/, dagcmp/, makepad/, hepr/, slug/   submodules, pinned
 ```
-

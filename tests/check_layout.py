@@ -8,7 +8,7 @@ directories of one directory) do not overlap; every line cell inside its
 file's rectangle; item rectangles inside their file's rectangle; and
 file_cols * file_rows >= rows for every file, and the rows of a line cover its characters.
 
-  tests/check_layout.py data/big-picture_atlas
+  tests/check_layout.py data/big-text_atlas
 """
 import argparse
 import json

@@ -10,3 +10,6 @@
 [submodule "hepr"]
 	path = hepr
 	url = https://github.com/soadzoor/Highly-Efficient-PDF-Renderer.git
+[submodule "slug"]
+	path = slug
+	url = https://github.com/EricLengyel/Slug.git

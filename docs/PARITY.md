@@ -79,14 +79,14 @@ To resume in a fresh clone (the generated data is not in git):
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
-git submodule update --init big-picture makepad
-./atlas_index.py big-picture --out data/big-picture_atlas
+git submodule update --init makepad
+./atlas_index.py . --out data/big-text_atlas
 ./atlas_index.py makepad/draw makepad/platform --out data/makepad-draw_atlas
-./atlas_resolve.py data/big-picture_atlas
+./atlas_resolve.py data/big-text_atlas
 ./atlas_resolve.py data/makepad-draw_atlas
-./atlas_history.py data/big-picture_atlas
+./atlas_history.py data/big-text_atlas
 ./atlas_history.py data/makepad-draw_atlas
-./atlas_layout.py data/big-picture_atlas
+./atlas_layout.py data/big-text_atlas
 ./atlas_layout.py data/makepad-draw_atlas
 ./tests/gen_synthetic_atlas.py
 ./tests/check_layout.py data/makepad-draw_atlas && ./tests/test_viewer_input.py && ./tests/test_vt_glyphs.py && ./tests/test_history.py && ./tests/test_viewer_history.py

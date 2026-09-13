@@ -5,24 +5,24 @@ Acceptance evidence for the two reference corpora, produced by the viewer's `--s
 Regenerate everything with:
 
 ```
-./atlas_index.py big-picture --out data/big-picture_atlas
+./atlas_index.py . --out data/big-text_atlas
 ./atlas_index.py makepad/draw makepad/platform --out data/makepad-draw_atlas
-./atlas_resolve.py data/big-picture_atlas
+./atlas_resolve.py data/big-text_atlas
 ./atlas_resolve.py data/makepad-draw_atlas
-./atlas_history.py data/big-picture_atlas
+./atlas_history.py data/big-text_atlas
 ./atlas_history.py data/makepad-draw_atlas
-./atlas_layout.py data/big-picture_atlas --preview docs/shots/big-picture_layout.png   # writes the tokens, references and lines layouts
+./atlas_layout.py data/big-text_atlas --preview docs/shots/big-text_layout.png   # writes every metric's layout and the layers layout
 ./atlas_layout.py data/makepad-draw_atlas --preview docs/shots/makepad-draw_layout.png
-./atlas_viewer.py data/big-picture_atlas --shots docs/shots/big-picture --filter Viewer --stats
+./atlas_viewer.py data/big-text_atlas --shots docs/shots/big-text --filter Viewer --stats
 ./atlas_viewer.py data/makepad-draw_atlas --shots docs/shots/makepad-draw --filter Window --stats    # also churn, age, changes, history
 ./atlas_viewer.py data/makepad-draw_atlas --proj 3d --tilt 55 --yaw 12 --hover platform/src/os/linux/x11/x11_sys.rs:8:12 --frames 2 --screenshot docs/shots/makepad-draw/3d_text.png
 ./atlas_viewer.py data/makepad-draw_atlas --inspector --frames 1 --screenshot docs/shots/makepad-draw/coverage.png
 ./atlas_viewer.py data/makepad-draw_atlas --inspect Window --frames 2 --screenshot docs/shots/makepad-draw/inspector.png
 ./atlas_viewer.py data/makepad-draw_atlas --hover platform/src/os/linux/x11/x11_sys.rs:8:12 --frames 2 --screenshot docs/shots/makepad-draw/hover_symbol.png
 ./atlas_viewer.py data/makepad-draw_atlas --compare '~100' --history --select platform/src/os/linux/vulkan.rs --frames 1 --screenshot docs/shots/makepad-draw/history_file.png
-./atlas_viewer.py data/big-picture_atlas --goto c/stb_image.h:120 --zoom 14 --frames 2 --screenshot docs/shots/big-picture/wrapped.png
-./atlas_viewer.py data/big-picture_atlas --goto vt_viewer.py:569 --zoom 120 --frames 3 --screenshot docs/shots/big-picture/text_120_raster.png --no-vector-text
-./atlas_viewer.py data/big-picture_atlas --goto vt_viewer.py:569 --zoom 120 --frames 3 --screenshot docs/shots/big-picture/text_120_vector.png
+./atlas_viewer.py data/big-text_atlas --goto README.md:3 --zoom 14 --frames 2 --screenshot docs/shots/big-text/wrapped.png
+./atlas_viewer.py data/big-text_atlas --goto atlas_viewer.py:399 --zoom 120 --frames 3 --screenshot docs/shots/big-text/text_120_raster.png --no-vector-text
+./atlas_viewer.py data/big-text_atlas --goto atlas_viewer.py:399 --zoom 120 --frames 3 --screenshot docs/shots/big-text/text_120_vector.png
 ./tests/bench_vt.py --out /tmp/bench && cp /tmp/bench/stack_12.png docs/shots/vt_bench_12.png && cp /tmp/bench/stack_96.png docs/shots/vt_bench_96.png
 ./atlas_viewer.py data/makepad-draw_atlas --proj 3d --tilt 55 --yaw 12 --color churn --history --goto platform/src/window.rs:1173 --zoom 2.2 --frames 2 --screenshot docs/shots/hero.png
 ```
