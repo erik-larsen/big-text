@@ -20,14 +20,14 @@ Regenerate everything with:
 ./atlas_viewer.py data/makepad-draw_atlas --inspect Window --frames 2 --screenshot docs/shots/makepad-draw/inspector.png
 ./atlas_viewer.py data/makepad-draw_atlas --hover platform/src/os/linux/x11/x11_sys.rs:8:12 --frames 2 --screenshot docs/shots/makepad-draw/hover_symbol.png
 ./atlas_viewer.py data/makepad-draw_atlas --compare '~100' --history --select platform/src/os/linux/vulkan.rs --frames 1 --screenshot docs/shots/makepad-draw/history_file.png
-./atlas_viewer.py data/big-text_atlas --goto README.md:3 --zoom 14 --frames 2 --screenshot docs/shots/big-text/wrapped.png
+./atlas_viewer.py data/big-text_atlas --goto README.md:219 --zoom 14 --frames 2 --screenshot docs/shots/big-text/wrapped.png
 ./atlas_viewer.py data/big-text_atlas --goto atlas_viewer.py:399 --zoom 120 --frames 3 --screenshot docs/shots/big-text/text_120_raster.png --no-vector-text
 ./atlas_viewer.py data/big-text_atlas --goto atlas_viewer.py:399 --zoom 120 --frames 3 --screenshot docs/shots/big-text/text_120_vector.png
 ./tests/bench_vt.py --out /tmp/bench && cp /tmp/bench/stack_12.png docs/shots/vt_bench_12.png && cp /tmp/bench/stack_96.png docs/shots/vt_bench_96.png
 ./atlas_viewer.py data/makepad-draw_atlas --proj 3d --tilt 55 --yaw 12 --color churn --history --goto platform/src/window.rs:1173 --zoom 2.2 --frames 2 --screenshot docs/shots/hero.png
 ```
 
-"N px per line" below means N device pixels per line for the file under the view centre (`c/vt_core.c` in big-picture, `platform/src/draw_shader.rs` in makepad-draw); files with a larger or smaller pitch sit on other rungs in the same frame, which is the per-file ladder at work.
+"N px per line" below means N device pixels per line for the file under the view centre (`atlas_resolve.py` in big-text, `platform/src/draw_shader.rs` in makepad-draw); files with a larger or smaller pitch sit on other rungs in the same frame, which is the per-file ladder at work.
 
 ## The README's opening image
 
@@ -35,22 +35,24 @@ Regenerate everything with:
 
 ## Layout previews
 
-- `big-picture_layout.png`: the layout stage's own render of big-picture (19 files, 15,216 lines): the `c/` directory band, files as 1 px outlines wrapped into up to 12 columns, one grey bar per line from indent to length.
+- `big-text_layout.png`: the layout stage's own render of big-text (33 files, about 9,500 lines): the `docs/`, `tests/`, `shaders/` and `notes/` bands, files as 1 px outlines wrapped into columns, one grey bar per line from indent to length.
 - `makepad-draw_layout.png`: the same for makepad/draw plus makepad/platform (493 files, 280,607 lines, 53 directories): nested directory bands in the top-level hue, big files wrapped into up to 14 columns, tiny files as slivers.
 
-## big-picture (19 files, 15,216 lines, 555,088 chars)
+## big-text (its own source: 33 files, about 9,500 lines, 23 commits)
 
-- `big-picture/overview.png`: the map fitted to the window: the `c/` band and label, root-level files as bordered rectangles, `stb_image.h` wrapped into 12 columns; at this size most files sit on the line-bars rung and the smallest ones already show text.
-- `big-picture/bars.png`: 2 px per line: the grey line-bars rung, the circuit-board texture of the video.
-- `big-picture/tokens.png`: 4.5 px per line: one coloured block per token (keywords blue, types yellow, strings pink, comments green) and item outlines in the item-kind colour.
-- `big-picture/text.png`: 16 px per line: legible syntax-coloured JetBrains Mono text from the vector tier (the default from 12 px per line), function outlines still drawn.
-- `big-picture/hover.png`: the text view with the cursor at the window centre: the hovered file gets the light fill and the label `c/vt_core.c:26 function smoothstep01` (path, line, enclosing item).
-- `big-picture/filter.png`: the fitted map with the filter `Viewer` applied: the one hit file outlined in yellow, every other file dimmed, the results panel listing 1 definition (`class Viewer`, tagged `class`) and 1 reference, the status line reading `1 definitions · 1 references · 1 files · 0/2`.
-- `big-picture/result.png`: after stepping to result 1: the fly-to landed on `class Viewer:` in `vt_viewer.py` at the text rung with the hit box filled yellow, the file's 3 px yellow border, the current row highlighted in the panel and the counter at `1/2`.
-- `big-picture/wrapped.png`: `--goto c/stb_image.h:120 --zoom 14`: the credits block's long lines wrapped inside their column, continuation rows hanging in by two characters.
-- `big-picture/text_120_raster.png`: `vt_viewer.py:569` at 120 px per line with `--no-vector-text`, drawn from the 64 px raster atlas: the magnified glyphs are visibly soft.
-- `big-picture/text_120_vector.png`: the same view with the default vector tier: the glyphs are crisp at any magnification.
-- `vt_bench_12.png`, `vt_bench_96.png`: `tests/bench_vt.py --out` evidence from phase 6: the same string at 12 and 96 px per line rendered by the Slug tier, the old grid tier (taken from git before the history rewrite removed it), the raster tier and the exact coverage, stacked in that order and enlarged; a rerun today writes three rows, without the grid.
+The default example, so the counts move by a few lines whenever this documentation is edited.
+
+- `big-text/overview.png`: the map fitted to the window: the root-level scripts as bordered rectangles wrapped into columns, the `docs/`, `tests/`, `shaders/` and `notes/` bands with their labels; at this size the files sit on the line-bars rung.
+- `big-text/bars.png`: 2 px per line: the grey line-bars rung.
+- `big-text/tokens.png`: 4.5 px per line: one coloured block per token (keywords blue, types yellow, strings pink, comments green) and item outlines in the item-kind colour.
+- `big-text/text.png`: 16 px per line: legible syntax-coloured JetBrains Mono text from the vector tier (the default from 12 px per line), function outlines still drawn.
+- `big-text/hover.png`: the text view with the cursor at the window centre: the hovered file gets the light fill and the label `atlas_resolve.py:71 def parser_for` (path, line, enclosing item).
+- `big-text/filter.png`: the fitted map with the filter `Viewer` applied: the three hit files outlined in yellow, every other file dimmed, the results panel listing 1 definition (`class Viewer` at `atlas_viewer.py:399`, tagged `class`) and 4 references, the status line reading `1 definitions · 4 references · 3 files · 0/5`.
+- `big-text/result.png`: after stepping to result 1: the fly-to landed on `class Viewer:` at the text rung with the hit box filled yellow, the file's 3 px yellow border, the current row highlighted in the panel and the counter at `1/5`.
+- `big-text/wrapped.png`: `--goto README.md:219 --zoom 14`: this README's longest paragraph wrapped inside its column, continuation rows hanging in by two characters.
+- `big-text/text_120_raster.png`: `atlas_viewer.py:399` at 120 px per line with `--no-vector-text`, drawn from the 64 px raster atlas: the magnified glyphs are visibly soft.
+- `big-text/text_120_vector.png`: the same view with the default vector tier: the glyphs are crisp at any magnification.
+- `big-text/references.png`, `3d.png`, `3d_zoom.png`, `layers.png`, `selection.png`, `churn.png`, `age.png`, `changes.png`, `history.png`: the rest of the `--shots` set on big-text (the references layout, the 3D projection, the Layers lens with its 13-file cycle and a selection, the colour lenses and a past revision); the README shows these on makepad-draw, where the scale makes the point.
 
 ## makepad-draw (493 files, 280,607 lines, 10,182,050 chars)
 
@@ -72,7 +74,6 @@ Regenerate everything with:
 - `makepad-draw/age.png`: the age lens: fill by rank of the last commit, newest teal, the oldest untouched files dark; the status line names the newest commit's date.
 - `makepad-draw/changes.png`: the Changes lens between the commit 100 back (`1f6b12f`) and HEAD with the rail shown: added files green, changed files amber by the fraction of lines touched, the two revisions tagged on the rail, the status `changes · 1f6b12f → HEAD · 78 added · 203 changed · 0 removed`, equal to `git diff --name-status` for the two directories.
 - `makepad-draw/history.png`: the corpus loaded at `1f6b12f` (415 files, 221,045 lines), the rail tagging it, the status `at 1f6b12f 2026-07-30`; its resolver and other layouts are read from the cache (a first load gets them in the background a second or two after the swap), so the toolbar has everything but the churn metric, which is HEAD's history.
-- `big-picture/churn.png`, `age.png`, `changes.png`, `history.png`: the same four for big-picture's own short history (`--shots` writes them for any atlas with `history.npz`).
 - `makepad-draw/history_file.png`: `vulkan.rs` selected with the Changes lens on: the Inspector's History block under the selection (commits, dates, lines, newest five commits) before the Uses and Used-by lists.
 - `makepad-draw/hover_symbol.png`: the cursor held on `Window` in x11_sys.rs at text zoom: the label reads the resolver's view, `type Window · 2 definitions · 102 references`.
 - `makepad-draw/result.png`: after stepping to result 1: the fly-to ends on `pub type Window = XID;` at 41 px per line with the hit box, the 3 px file border and the crumb trail `← makepad-draw › platform › src › os › linux › x11`.

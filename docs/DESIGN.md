@@ -479,3 +479,7 @@ In 3D at close range the item outlines painted solid triangles over half of ever
 ## The Dobbie directory, removed
 
 With the vector tier on Slug and the raster tier and document layout written from his posts, nothing in the build or the tests read Dobbie's demo files, so on 2026-09-13 the `dobbie/` directory (a README on the two demos and the script that fetched them for study) was removed too. Dobbie is a lineage, and the lineage table's links to his posts are the reference. The contract and as-built sections above that mention `dobbie/` and `fetch.sh` describe the state at the time.
+
+## The default example is big-text itself; Slug pinned
+
+On 2026-09-13 the README's default example became big-text's own tree (33 files, about 9,500 lines, 23 commits, a 13-file cycle for the Layers lens), so a clone runs the viewer with no submodule fetched; makepad stays the example for scale, and the big-picture screenshots were replaced by big-text ones. The Slug reference repository was pinned as the `slug/` submodule at be3c13e so that every lineage with a repository is pinned the same way and the translation in `shaders/vt_glyph.glsl` can be checked against its source.
