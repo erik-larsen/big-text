@@ -27,6 +27,8 @@ import numpy as np
 WORLD_W = 1600.0
 PAD_FRAC, PAD_MIN, PAD_MAX = 0.015, 0.05, 4.0
 PAD_LINES, PAD_MIN_LINES = 2.0, 0.01   # a treemap directory's padding: about two of its own lines
+PAGE_GAP = 0.08            # a book's gutter between pages, as a fraction of the cell width, as Dobbie's grid
+PAGE_MARGIN = (0.10, 0.08) # a book page's inner margins, as fractions of the page's width and height
 AREA_PER_LINE = 34.0       # world area a line takes at pitch 1: p tall, about 60 characters of 0.57 p wide
 GAP = 0.06                 # column gap as a fraction of the column width
 MAX_COLS = 64
@@ -200,15 +202,20 @@ def book_flow(dirs, world, page_aspect):
     best = None
     for cols in range(1, max(n, 1) + 1):
         rows = -(-n // cols)
-        ratio = ((x1 - x0) / cols) / ((y1 - y0) / rows) / page_aspect
+        cw, ch = (x1 - x0) / cols, (y1 - y0) / rows
+        gap = PAGE_GAP * cw
+        if ch <= gap:                         # rows too short for a gutter: more columns
+            continue
+        ratio = (cw - gap) / (ch - gap) / page_aspect
         key = (ratio < 1, abs(math.log(ratio)))
         if best is None or key < best[0]:
             best = (key, cols, rows)
     _, cols, rows = best
     cw, ch = (x1 - x0) / cols, (y1 - y0) / rows
+    g = PAGE_GAP * cw / 2                     # half a gutter on every side of a page
     for k, f in enumerate(files):
         i, j = divmod(k, cols)
-        file_rect[f] = (x0 + j * cw, y0 + i * ch, x0 + (j + 1) * cw, y0 + (i + 1) * ch)
+        file_rect[f] = (x0 + j * cw + g, y0 + i * ch + g, x0 + (j + 1) * cw - g, y0 + (i + 1) * ch - g)
     return [root], np.zeros(n, np.int64), dir_rect, dir_pad, file_rect, cols
 
 
@@ -608,7 +615,8 @@ def build_layout(args, z, meta, t0):
     if flat:
         # a page cell's aspect: the book's line width by its fullest page
         page = (int(meta.get("page_lines", np.diff(file_line0).max())), float(np.percentile(line_w, 99.5)))
-        aspect_p = page[1] / (page[0] + 2)
+        mx, my = PAGE_MARGIN
+        aspect_p = page[1] / (page[0] + 2) * (1 - 2 * my) / (1 - 2 * mx)   # the page around its text block
         if args.book_layout == "parts":
             dir_rect, dir_pad, file_rect, book_cols = book_layout(dirs, world, aspect_p)
         else:
@@ -621,13 +629,19 @@ def build_layout(args, z, meta, t0):
     for d in range(1, n_dirs):
         dir_depth[d] = dir_depth[dirs[d]["parent"]] + 1
 
-    pitch, cols, rows, cap, colw, capw = layout_files(file_rect, file_line0, line_len, line_w,
+    # the text block: a book page's inner rectangle, the file itself for code
+    file_text = file_rect.copy()
+    if flat:
+        mx, my = PAGE_MARGIN
+        w, h = file_rect[:, 2] - file_rect[:, 0], file_rect[:, 3] - file_rect[:, 1]
+        file_text += np.stack([mx * w, my * h, -mx * w, -my * h], axis=1)
+    pitch, cols, rows, cap, colw, capw = layout_files(file_text, file_line0, line_len, line_w,
                                                       args.char_aspect, page, prop)
     if prop:
         # the exact wrap can take more rows than the estimate the pitch was
         # found with: lower the pitch of those files and wrap again until
         # every file's rows fit its columns
-        fh = file_rect[:, 3] - file_rect[:, 1]
+        fh = file_text[:, 3] - file_text[:, 1]
         for _ in range(8):
             line_row0, row_line, row_col0, row_len, row_first = wrap_rows_w(file_line0, line_off, char_w, line_w, capw, prop[1])
             need = -(-np.diff(line_row0[file_line0]).astype(np.int64) // cols)
@@ -643,7 +657,7 @@ def build_layout(args, z, meta, t0):
         char_x = None
         row_width = (np.minimum(row_len.astype(np.int64), cap[z["line_file"][row_line]].astype(np.int64)) * args.char_aspect).astype(np.float32)
     file_row0 = line_row0[file_line0]
-    row_pos = row_positions(file_rect, file_row0, pitch, rows, colw, row_first,
+    row_pos = row_positions(file_text, file_row0, pitch, rows, colw, row_first,
                             prop[1] if prop else HANG * args.char_aspect)
     row_indent = np.where(row_first, line_indent[row_line], 0)
     # items in rows: the first row of the start line to the first row of the end line
@@ -653,13 +667,14 @@ def build_layout(args, z, meta, t0):
     ge = file_line0[f].astype(np.int64) + np.minimum(z["item_end"].astype(np.int64), n_lines_f[f])
     s_row = line_row0[gs] - file_row0[f]
     e_row = line_row0[ge] - file_row0[f]
-    irect, iitem = item_rects(z["item_file"], s_row, e_row, file_rect, file_row0, pitch, rows, colw)
+    irect, iitem = item_rects(z["item_file"], s_row, e_row, file_text, file_row0, pitch, rows, colw)
 
     np.savez(os.path.join(args.atlas, "layout.npz"),
              world=world.astype(np.float64),
              dir_rect=dir_rect.astype(np.float64), dir_pad=dir_pad.astype(np.float64),
              dir_depth=dir_depth.astype(np.uint16), dir_hue=dir_hue.astype(np.uint8),
-             file_rect=file_rect.astype(np.float64), file_pitch=pitch.astype(np.float64),
+             file_rect=file_rect.astype(np.float64), file_text=file_text.astype(np.float64),
+             file_pitch=pitch.astype(np.float64),
              file_cols=cols.astype(np.uint16), file_rows=rows.astype(np.uint32),
              file_cap=cap.astype(np.uint16), file_colw=colw.astype(np.float64),
              file_hue=file_hue.astype(np.uint8), file_row0=file_row0.astype(np.uint32),

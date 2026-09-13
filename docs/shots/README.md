@@ -51,7 +51,7 @@ The line numbers in the `--goto` and `--hover` commands are the ones that held w
 
 - `big-text_layout.png`: the layout stage's own render of big-text (29 files, about 7,200 lines): the `docs/`, `tests/` and `shaders/` bands, files as 1 px outlines wrapped into columns, one grey bar per line from indent to length.
 - `emscripten_layout.png`: the same for the whole emscripten tree (11,495 files, 2.80 million lines, 698 directories): nested directory bands in the top-level hue, `test/` and `system/` the largest, big files wrapped into up to 64 columns, tiny files as slivers.
-- `war-and-peace_layout.png`: the book: one grid of 1,401 pages in reading order, 58 across, one grey bar per line, a chapter's last page short.
+- `war-and-peace_layout.png`: the book: one grid of 1,401 pages in reading order, 60 across, in gutters, one grey bar per line, a chapter's last page short.
 
 ## big-text (its own source: 29 files, about 7,200 lines)
 

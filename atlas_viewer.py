@@ -1368,7 +1368,7 @@ class Viewer:
         if f is None:
             return None
         a = self.a
-        x0, y0 = a["file_rect"][f, :2]
+        x0, y0 = a.get("file_text", a["file_rect"])[f, :2]     # the text block: a book page's inner rectangle
         p, k, rows, colw = (float(a["file_pitch"][f]), int(a["file_cols"][f]),
                             int(a["file_rows"][f]), float(a["file_colw"][f]))
         n = int(a["file_row0"][f + 1] - a["file_row0"][f])
