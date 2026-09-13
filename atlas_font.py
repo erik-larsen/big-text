@@ -9,11 +9,11 @@ round(cell * A) wide, where A = advance / (ascent + descent) is the
 character aspect the layout stage also uses.
 
 The line box is the face's ASCII ink extents: the top of the tallest and
-the bottom of the deepest glyph among 32..126 (Menlo's brace and bar, 1.054
-em; JetBrains Mono's dollar and at sign, 1.050 em), not the OS/2 box, whose
-leading differs wildly between faces (JetBrains Mono's is 1.32 em) and
-would change every proportion with the font. The baseline sits at ascent
-from the top of the cell. Both glyph tiers use this box.
+the bottom of the deepest glyph among 32..126 (JetBrains Mono's dollar and
+at sign, 1.050 em), not the OS/2 box, whose leading differs wildly between
+faces (JetBrains Mono's is 1.32 em) and would change every proportion with
+the font. The baseline sits at ascent from the top of the cell. Both glyph
+tiers use this box.
 
     ./atlas_font.py --self-test atlas.png      # writes the PNG, prints metrics
     build_atlas(font_path, index, cell) -> (np.uint8[h, w], metrics)
