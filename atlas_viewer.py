@@ -2072,7 +2072,12 @@ class Viewer:
         for name, ppl in (("bars.png", 2.0), ("tokens.png", 4.5), ("text.png", 16.0)):
             self.set_zoom_ppl(ppl, centre)
             snap(name)
-        self.cursor_override = (self.map_w / 2, self.map_y0 + self.map_h / 2)
+        # the cursor on the file nearest the centre (the centre itself may be a gutter)
+        r = self.a["file_rect"]
+        fc = np.stack([(r[:, 0] + r[:, 2]) / 2, (r[:, 1] + r[:, 3]) / 2], axis=1)
+        f = int(np.argmin(np.hypot(fc[:, 0] - self.cx, fc[:, 1] - self.cy)))
+        self.camera_matrix()
+        self.cursor_override = self.world_to_screen(fc[f, 0], fc[f, 1])
         snap("hover.png")
         self.cursor_override = None
         self.fit()

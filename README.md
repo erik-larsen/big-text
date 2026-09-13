@@ -129,7 +129,7 @@ The README's second image is the viewer scripted from the shell, and the opening
 
 ```bash
 ./atlas_viewer.py data/war-and-peace_atlas --proj 3d --tilt 55 --yaw 12 --goto "p. 481:1" --zoom 3 --frames 2 --no-hover --screenshot hero.png
-./atlas_viewer.py data/war-and-peace_atlas --goto "p. 17:1" --zoom 11
+./atlas_viewer.py data/war-and-peace_atlas --goto "p. 21:22" --zoom 11
 ```
 
 Any Gutenberg plain text works the same way: `--gutenberg N` with its ebook number, or a path to a text file already on disk. A text whose parts and chapters are headed `BOOK`, `PART`, `VOLUME`, `EPILOGUE` or `PROLOGUE` and `CHAPTER` at the start of a line splits as War and Peace does; a text without headings becomes one part named after the corpus, its pages `name/p. 1` onward. `--font` sets the face, any TrueType or OpenType file under the repository, and everything that depends on it follows: the reflow, the footer, the centred headings and the ink are measured from the face at index time; `--leading` its air between lines (1.3); `--page-lines` sets the page (40 by default), `--page-aspect` its shape (Letter, `612:792`), `--no-reflow` keeps Gutenberg's own line breaks, `--front` names the part before the first heading (`Front matter`), and `--name` the corpus. The text is kept in Windows-1252, which both glyph tiers cover, so Natásha keeps her accent and the quotes stay curly; a character outside it becomes `?`.
@@ -195,7 +195,7 @@ The same images for War and Peace, in `docs/shots/war-and-peace/`. The map fitte
 
 ![the book fitted](docs/shots/war-and-peace/overview.png)
 
-The book opens: the contents on the front-matter pages, then `Book One: 1805` and the first line of Chapter I, at 11 pixels per line.
+The book opens: the last pages of the contents, then page 21, `BOOK ONE: 1805` and Chapter I, at 11 pixels per line, the footer under every page.
 
 ![the opening pages](docs/shots/war-and-peace/opening.png)
 

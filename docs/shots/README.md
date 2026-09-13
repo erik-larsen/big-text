@@ -22,7 +22,7 @@ Regenerate everything with:
 ./atlas_viewer.py data/emscripten_atlas --proj 3d --heights --tilt 55 --yaw 12 --tint --goto tools/link.py:1500 --zoom 2.2 --frames 2 --screenshot docs/shots/emscripten/hero.png
 ./atlas_viewer.py data/emscripten_atlas --proj 3d --heights --tilt 55 --yaw 12 --hover emcc.py:199:5 --frames 2 --screenshot docs/shots/emscripten/3d_text.png
 ./atlas_viewer.py data/war-and-peace_atlas --proj 3d --tilt 55 --yaw 12 --goto "p. 481:1" --zoom 3 --frames 2 --no-hover --screenshot docs/shots/war-and-peace/hero.png
-./atlas_viewer.py data/war-and-peace_atlas --goto "p. 17:1" --zoom 11 --frames 2 --no-hover --screenshot docs/shots/war-and-peace/opening.png
+./atlas_viewer.py data/war-and-peace_atlas --goto "p. 21:22" --zoom 11 --frames 2 --no-hover --screenshot docs/shots/war-and-peace/opening.png
 ```
 
 The line numbers in the `--goto` and `--hover` commands are the ones that held when the images were taken (`class Viewer`, `def tokenize`, the README's longest line, emcc's `def main`); they move as the files are edited.
@@ -35,7 +35,7 @@ The line numbers in the `--goto` and `--hover` commands are the ones that held w
 
 - `overview.png`: the map fitted to the window.
 - `bars.png`, `tokens.png`, `text.png`: 2, 4.5 and 16 px per line about the corpus centre: the line-bars LOD, the tokens LOD with item outlines, the text LOD.
-- `hover.png`: the text view with the cursor at the window centre: the hovered file's light border and label.
+- `hover.png`: the text view with the cursor on the file nearest the window centre: the hovered file's light border and label.
 - `filter.png`: the fitted map with the `--filter` word applied: every hit file outlined in yellow, the rest dimmed, the panel listing the hits by file, the status line counting them.
 - `result.png`: after stepping to the first hit: the fly-to landed at the text LOD with the hit filled yellow, the file's 3 px border, the row highlighted in the panel.
 - `3d.png`, `3d_zoom.png`: the 3D projection with the heights on, at tilt 55 and yaw 12, fitted and at 3 px per line about the centre.
@@ -72,10 +72,10 @@ The whole tree as git tracks it, test suites and system libraries included, at t
 In the book's own scheme, Dobbie's: white pages and black text on his demo's blue-grey ground, the text in Literata, justified, with a book's leading, every glyph placed by its own advance, the quotes curly and the accents kept, the pages fading to pale grey as the text gives way to blocks and bars, every page with its running footer. The standard set with `--filter Natásha` (1,213 hits on 310 pages), a book having no tint, plus:
 
 - `war-and-peace/overview.png`: the map fitted: one grid of pages in reading order, the front matter's contents pages first, each page a cell at the line-bars LOD; no part is drawn, the crumb trail names the one under the centre.
-- `war-and-peace/hover.png`: the text view hovered at the centre: the label `Book Eight: 1811 - 12/Chapter IX/p. 657` (part, chapter, page; a book has no items).
-- `war-and-peace/result.png`: after stepping to the first mention (Book One, Chapter XI, p. 56, line 41), the fly-to at text zoom with the hit filled yellow.
+- `war-and-peace/hover.png`: the text view with the cursor on the page nearest the centre (the centre itself is a gutter): the label `Book Nine: 1812/Chapter XII/p. 783:20` (part, chapter, page and line; a book has no items).
+- `war-and-peace/result.png`: after stepping to the first mention (Book One, Chapter XI, p. 63, line 32), the fly-to at text zoom with the hit filled yellow and the panel listing the hits by page.
 - `war-and-peace/3d.png`, `3d_zoom.png`: the grid tilted, nothing extruded: a book's layout is flat whatever the heights setting.
-- `war-and-peace/opening.png`: `--goto "p. 17:1" --zoom 11`: the book's first pages, the contents on the front-matter pages above `Book One: 1805` and Chapter I.
+- `war-and-peace/opening.png`: `--goto "p. 21:22" --zoom 11`: the last pages of the contents, then page 21, `BOOK ONE: 1805` and Chapter I.
 
 ## Frame times
 
