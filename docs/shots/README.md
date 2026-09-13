@@ -24,14 +24,21 @@ Regenerate everything with:
 ./atlas_viewer.py data/big-text_atlas --goto atlas_viewer.py:399 --zoom 120 --frames 3 --screenshot docs/shots/big-text/text_120_raster.png --no-vector-text
 ./atlas_viewer.py data/big-text_atlas --goto atlas_viewer.py:399 --zoom 120 --frames 3 --screenshot docs/shots/big-text/text_120_vector.png
 ./tests/bench_vt.py --out /tmp/bench && cp /tmp/bench/stack_12.png docs/shots/vt_bench_12.png && cp /tmp/bench/stack_96.png docs/shots/vt_bench_96.png
-./atlas_viewer.py data/makepad-draw_atlas --proj 3d --tilt 55 --yaw 12 --color churn --history --goto platform/src/window.rs:1173 --zoom 2.2 --frames 2 --screenshot docs/shots/hero.png
+./atlas_viewer.py data/makepad-draw_atlas --proj 3d --tilt 55 --yaw 12 --color churn --history --goto platform/src/window.rs:1173 --zoom 2.2 --frames 2 --screenshot docs/shots/makepad-draw/hero.png
+./atlas_viewer.py data/big-text_atlas --proj 3d --tilt 55 --yaw 12 --color churn --history --frames 1 --no-hover --screenshot docs/shots/big-text/hero.png
+./atlas_viewer.py data/big-text_atlas --proj 3d --tilt 55 --yaw 12 --hover atlas_resolve.py:71:5 --frames 2 --screenshot docs/shots/big-text/3d_text.png
+./atlas_viewer.py data/big-text_atlas --hover atlas_viewer.py:399:7 --frames 2 --screenshot docs/shots/big-text/hover_symbol.png
+./atlas_viewer.py data/big-text_atlas --inspect Viewer --frames 2 --screenshot docs/shots/big-text/inspector.png
+./atlas_viewer.py data/big-text_atlas --inspector --frames 1 --screenshot docs/shots/big-text/coverage.png
+./atlas_viewer.py data/big-text_atlas --compare '~22' --history --select atlas_viewer.py --frames 1 --screenshot docs/shots/big-text/history_file.png
 ```
 
 "N px per line" below means N device pixels per line for the file under the view centre (`atlas_resolve.py` in big-text, `platform/src/draw_shader.rs` in makepad-draw); files with a larger or smaller pitch sit on other rungs in the same frame, which is the per-file ladder at work.
 
 ## The README's opening image
 
-- `hero.png`: makepad-draw in 3D at tilt 55 and yaw 12, 2.2 px per line about `platform/src/window.rs`, the churn lens on and the revision rail shown: the near roofs at the tokens and text rungs, the far ones at bars, the most edited files ember.
+- `big-text/hero.png`: big-text's own source fitted in 3D at tilt 55 and yaw 12 with the churn lens on and the revision rail shown: the most edited files ember, the roofs at the rungs their sizes allow.
+- `makepad-draw/hero.png`: the same on makepad-draw at 2.2 px per line about `platform/src/window.rs`: the near roofs at the tokens and text rungs, the far ones at bars.
 
 ## Layout previews
 
@@ -52,7 +59,17 @@ The default example, so the counts move by a few lines whenever this documentati
 - `big-text/wrapped.png`: `--goto README.md:219 --zoom 14`: this README's longest paragraph wrapped inside its column, continuation rows hanging in by two characters.
 - `big-text/text_120_raster.png`: `atlas_viewer.py:399` at 120 px per line with `--no-vector-text`, drawn from the 64 px raster atlas: the magnified glyphs are visibly soft.
 - `big-text/text_120_vector.png`: the same view with the default vector tier: the glyphs are crisp at any magnification.
-- `big-text/references.png`, `3d.png`, `3d_zoom.png`, `layers.png`, `selection.png`, `churn.png`, `age.png`, `changes.png`, `history.png`: the rest of the `--shots` set on big-text (the references layout, the 3D projection, the Layers lens with its 13-file cycle and a selection, the colour lenses and a past revision); the README shows these on makepad-draw, where the scale makes the point.
+- `big-text/hover_symbol.png`: `--hover atlas_viewer.py:399:7`: the cursor on `Viewer` at its definition, the label `atlas_viewer.py:399 class Viewer · 1 definition · 2 references` (the references the resolver tied to this class).
+- `big-text/inspector.png`: the Inspector on `class Viewer` (`--inspect Viewer`): kind, name, path and line, its references grouped by file, each a click away.
+- `big-text/coverage.png`: the Inspector with nothing selected (`--inspector`): the resolver's coverage block, one line per resolution status with its count.
+- `big-text/references.png`: the map laid out by the references metric: the scripts everything imports grow, the documents shrink.
+- `big-text/3d.png`, `3d_zoom.png`: the references layout in the 3D projection at tilt 55 and yaw 12, fitted and at 3 px per line about the centre: the most referenced scripts as the tallest blocks, the ladder on every roof.
+- `big-text/3d_text.png`: `--proj 3d --hover atlas_resolve.py:71:5`: text zoom on a roof in perspective with the hover label.
+- `big-text/layers.png`, `selection.png`: the Layers lens fitted (two ranks, the 13 mutually importing scripts as one cycle, 13 unreferenced files in their own row), and `atlas_viewer.py` selected: the 7 files it uses and the 10 that use it lit in teal, the Inspector listing them after its history.
+- `big-text/churn.png`, `age.png`: the churn and age lenses over the fitted map.
+- `big-text/changes.png`: the Changes lens between the first commit and HEAD with the rail shown: 29 files added in green, 3 changed in amber, 2 removed and counted in the status line.
+- `big-text/history.png`: the corpus loaded at the first commit, 6 files and 225 lines, the rail tagging it.
+- `big-text/history_file.png`: `atlas_viewer.py` selected with the Changes lens on: the Inspector's History block under the selection (commits, dates, lines, newest five commits) before the Uses and Used-by lists.
 
 ## makepad-draw (493 files, 280,607 lines, 10,182,050 chars)
 

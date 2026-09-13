@@ -2771,7 +2771,8 @@ class Viewer:
                 self.cx, self.cy = centre
                 self.zoom = z0 * (z1 / z0) ** u
                 self.z_focus = self.focus_target() if self.proj == "3d" else 0.0
-                self.cursor_override = (self.map_w / 2, self.map_y0 + self.map_h / 2)
+                if not getattr(self.args, "no_hover", False):
+                    self.cursor_override = (self.map_w / 2, self.map_y0 + self.map_h / 2)
             now = time.perf_counter()
             self.frame(now - last)
             last = now
@@ -2950,6 +2951,8 @@ def main():
                     help="open the Inspector with nothing selected (the coverage block)")
     ap.add_argument("--inspect", default=None, metavar="NAME",
                     help="open the Inspector on the first entity of that name (needs resolve.npz)")
+    ap.add_argument("--no-hover", action="store_true",
+                    help="scripted frames: no hover highlight or label on the file under the centre")
     ap.add_argument("--hover", default=None, metavar="PATH:LINE:COL",
                     help="fly there and hold the cursor on that cell (for screenshots)")
     ap.add_argument("--color", default=None, choices=LENSES[1:],

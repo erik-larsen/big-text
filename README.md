@@ -2,9 +2,9 @@
 
 big-text is the text-scale sibling of [big-picture](https://github.com/erik-larsen/big-picture): view millions of lines of source code, or a whole book, as one continuous surface. Zoom out and a codebase looks like a circuit board; zoom in and every glyph is crisp. No page turns, no mode switches, one camera.
 
-![makepad's drawing and platform crates in 3D, the churn lens colouring the most edited files ember, the revision rail along the bottom](docs/shots/hero.png)
+![big-text's own source in 3D, the churn lens colouring the most edited files ember, the revision rail along the bottom](docs/shots/big-text/hero.png)
 
-*makepad's drawing and platform crates, 493 files and 280,607 lines, tilted into 3D with the churn lens: the most edited files glow ember, every roof carries its code at the rung its size allows, and the rail along the bottom is the repository's 689 commits.*
+*big-text viewing itself: 33 files and about 9,500 lines tilted into 3D with the churn lens, the most edited files ember, every roof carrying its code at the rung its size allows, and the rail along the bottom the repository's commits.*
 
 It shows three kinds of content, in this order of priority: text, images, 2D vector work. Each has an open-source lineage, and the ladder that ties them together has a fourth:
 
@@ -137,49 +137,46 @@ Glyphs from 12 device pixels per line come from the vector tier by default, cris
 
 ## What it looks like
 
-The makepad drawing and platform crates fitted to the window. Every file is a rectangle wrapped into columns, and below one pixel per line the viewer draws one sampled bar per pixel row, which is what gives the circuit-board texture.
+Every image is big-text viewing its own source; `docs/shots/README.md` has the command behind each, and `docs/shots/makepad-draw/` holds the same set on makepad's drawing and platform crates, 493 files and 280,607 lines, where the scale is the point.
 
-![makepad-draw overview](docs/shots/makepad-draw/overview.png)
+The map fitted to the window. Every file is a rectangle wrapped into columns, the directories are bands in their own hue, and at this size the files sit on the line-bars rung, one grey bar per line from indent to length.
 
-The same corpus with the filter `Window`: 31 files outlined in yellow at the overview, the rest dimmed, the panel populated.
+![overview](docs/shots/big-text/overview.png)
 
-![makepad-draw filter](docs/shots/makepad-draw/filter.png)
+The four rungs, from the fitted map through 2, 4.5 and 16 device pixels per line: bars, token blocks with item outlines, then text.
 
-big-text's own source at the four rungs, from the fitted map through 2, 4.5 and 16 device pixels per line: bars, token blocks with item outlines, then text.
+![bars](docs/shots/big-text/bars.png)
+![tokens](docs/shots/big-text/tokens.png)
+![text](docs/shots/big-text/text.png)
 
-![big-text overview](docs/shots/big-text/overview.png)
-![big-text bars](docs/shots/big-text/bars.png)
-![big-text tokens](docs/shots/big-text/tokens.png)
-![big-text text](docs/shots/big-text/text.png)
+The filter `Viewer`: the three files that define or use it outlined in yellow, the rest dimmed, the panel listing the one definition and four references; then the view after stepping to the first result, the hit filled yellow at text zoom.
 
-makepad-draw laid out by references instead of tokens: the files everything depends on grow, the generated bindings shrink.
+![filter](docs/shots/big-text/filter.png)
+![result](docs/shots/big-text/result.png)
 
-![references layout](docs/shots/makepad-draw/references.png)
+The resolver's view: hovering `Viewer` at its definition shows its definition and reference counts, and the Inspector on the class lists its references grouped by file.
 
-The 3D projection over the references layout: the cores of the codebase as the tallest buildings, directories as terraces, the ladder still drawn on every roof so the near rows are text and the far rows are bars.
+![symbol hover](docs/shots/big-text/hover_symbol.png)
+![inspector](docs/shots/big-text/inspector.png)
 
-![3D city](docs/shots/makepad-draw/3d.png)
-![3D close](docs/shots/makepad-draw/3d_zoom.png)
-![3D text](docs/shots/makepad-draw/3d_text.png)
+The map laid out by references instead of tokens: the files everything imports grow, the notes and documents shrink.
 
-A long line wrapped inside its column at text zoom, the continuation rows hanging in by two characters: this README's opening paragraph.
+![references layout](docs/shots/big-text/references.png)
+
+The 3D projection over the references layout: the most referenced files as the tallest buildings, directories as terraces, the ladder still drawn on every roof so the near rows are text and the far rows are bars.
+
+![3D](docs/shots/big-text/3d.png)
+![3D close](docs/shots/big-text/3d_zoom.png)
+![3D text](docs/shots/big-text/3d_text.png)
+
+A long line wrapped inside its column at text zoom, the continuation rows hanging in by two characters: this README's longest paragraph.
 
 ![wrapped lines](docs/shots/big-text/wrapped.png)
 
-The Layers lens on makepad-draw: every file in a row by its dependency rank, highest on top, the strongly connected component of 355 mutually referencing platform files grouped as one cycle; and a selection of the x11 bindings lighting the 224 files that use them.
+The Layers lens: every file in a row by its dependency rank, the 13 scripts that reference each other grouped as one cycle, the 13 files nothing references in a row of their own; and `atlas_viewer.py` selected, lighting the 7 files it uses and the 10 that use it, with its history in the Inspector.
 
-![layers lens](docs/shots/makepad-draw/layers.png)
-![selection](docs/shots/makepad-draw/selection.png)
-
-The resolver's view of makepad-draw: hovering `Window` in the x11 bindings, and the Inspector on the enum variant of the same name with its references grouped by file.
-
-![symbol hover](docs/shots/makepad-draw/hover_symbol.png)
-![inspector](docs/shots/makepad-draw/inspector.png)
-
-Filter and fly-to on big-text: the files defining or using `Viewer` outlined and the panel listing them, then the view after stepping to the first result.
-
-![big-text filter](docs/shots/big-text/filter.png)
-![big-text result](docs/shots/big-text/result.png)
+![layers lens](docs/shots/big-text/layers.png)
+![selection](docs/shots/big-text/selection.png)
 
 The two glyph tiers at 120 pixels per line: the 64 pixel raster atlas magnified (left) and the vector tier (right).
 
@@ -188,20 +185,20 @@ The two glyph tiers at 120 pixels per line: the 64 pixel raster atlas magnified 
 
 The colour lenses over the fitted map: churn (lines added and removed over the whole history, log scale, in ember) and age (rank by last commit, newest in teal). The bars and glyphs are untouched; only the file fill carries the lens.
 
-![churn lens](docs/shots/makepad-draw/churn.png)
-![age lens](docs/shots/makepad-draw/age.png)
+![churn lens](docs/shots/big-text/churn.png)
+![age lens](docs/shots/big-text/age.png)
 
-Changes between the commit 100 back and HEAD, with the revision rail along the bottom: 78 files added in green, 203 changed in amber by the fraction of their lines touched, the two revisions tagged on the rail, and the counts in the status line, which equal `git diff --name-status` between the two.
+Changes between the first commit and HEAD, with the revision rail along the bottom: 29 files added in green, 3 changed in amber by the fraction of their lines touched, 2 removed and counted in the status line, the two revisions tagged on the rail.
 
-![changes lens](docs/shots/makepad-draw/changes.png)
+![changes lens](docs/shots/big-text/changes.png)
 
-The corpus loaded at that commit, 415 files instead of 493, re-indexed from `git archive` in under a second and cached; its resolver and other layouts follow in the background, and the map keeps the camera.
+The corpus loaded at that first commit, 6 files and 225 lines, re-indexed from `git archive` in under a second and cached; its resolver and other layouts follow in the background, and the map keeps the camera.
 
-![a past revision](docs/shots/makepad-draw/history.png)
+![a past revision](docs/shots/big-text/history.png)
 
 A file selected with the Changes lens on: the Inspector shows its commits, dates, lines added and removed, and its newest five commits before its Uses and Used-by lists.
 
-![file history](docs/shots/makepad-draw/history_file.png)
+![file history](docs/shots/big-text/history_file.png)
 
 ## Implementation
 
