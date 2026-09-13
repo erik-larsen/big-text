@@ -265,10 +265,10 @@ def reflow(lines, measure, width):
 
 def letter_width(page_lines, aspect):
     """The text width in line heights that makes a page of page_lines
-    lines, a blank and a footer, inside PAGE_MARGIN, a page of `aspect`
+    lines, two blanks and a footer, inside PAGE_MARGIN, a page of `aspect`
     (width over height): Letter by default."""
     mx, mt, mb = PAGE_MARGIN
-    rows = page_lines + 2
+    rows = page_lines + 3
     return aspect * (1 - 2 * mx) / (1 - mt - mb) * (rows + 2)
 
 
@@ -296,7 +296,7 @@ def build(parts, page_lines, name, measure=None, width=None, author="", book_tit
     path names its chapter (`Book One: 1805/Chapter III/p. 27`), so the
     layout is a grid of pages per part, as printed. A text without any
     heading is one part named after the corpus, its pages `name/p. N`.
-    Every page is padded to page_lines lines and given a blank line and a
+    Every page is padded to page_lines lines and given two blank lines and a
     running footer, and chapter headings are centred on the page width, as
     a printed page has them."""
     dirs = [{"path": "", "parent": -1, "children": [], "files": [], "top": 0}]
@@ -320,7 +320,7 @@ def build(parts, page_lines, name, measure=None, width=None, author="", book_tit
                 if measure is not None:
                     page = [(" " * measure.spaces((width - measure.width(ln)) / 2) + ln.strip())
                             if CHAPTER_RX.match(ln.rstrip()) else ln for ln in page]
-                    page = page + [""] * (page_lines - len(page)) + ["", footer_line(measure, width, author, str(page_no), book_title)]
+                    page = page + [""] * (page_lines - len(page)) + ["", "", footer_line(measure, width, author, str(page_no), book_title)]
                 results.append(index_page(rel, page, footer=measure is not None))
     return dirs, files, file_dir, results
 
@@ -389,7 +389,7 @@ def main():
     seconds = round(time.time() - t0, 2)
     stats = write_index(args.out, args.name, os.path.abspath(args.text), dirs, files, file_dir,
                         results, skipped, seconds,
-                        extra={"corpus": "book", "page_lines": args.page_lines, "page_rows": args.page_lines + 2,
+                        extra={"corpus": "book", "page_lines": args.page_lines, "page_rows": args.page_lines + 3,
                                "title": book_title, "author": author, "scheme": SCHEME})
     n_chapters = sum(len(c) for _, c in parts)
     print(f"wrote {args.out}/index.npz + index.json: {len(parts)} parts, {n_chapters} chapters, "

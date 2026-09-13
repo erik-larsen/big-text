@@ -8,7 +8,7 @@ big-text is the text-scale sibling of [big-picture](https://github.com/erik-lars
 
 ![War and Peace flyover: one flat sheet of pages, the near ones as text, the far rows as line bars, the Books as coloured bands](docs/shots/war-and-peace/hero.png)
 
-*The same viewer on War and Peace, Dobbie's example, in his colours and a book face: white pages on the blue-grey ground of his demo, Literata set by its own advances, 1,491 pages and 2.67 million glyphs as one grid in reading order, tilted, the near pages at the text LOD and the far rows at bars in the same frame.*
+*The same viewer on War and Peace, Dobbie's example, in his colours and a book face: white pages on the blue-grey ground of his demo, Literata set by its own advances, 1,467 pages and 2.67 million glyphs as one grid in reading order, tilted, the near pages at the text LOD and the far rows at bars in the same frame.*
 
 It shows three kinds of content, in this order of priority: text, images, 2D vector work. Each has an open-source lineage, and the levels of detail that tie them together have a fourth:
 
@@ -121,9 +121,9 @@ Dobbie's example, War and Peace, needs nothing beyond the install: no submodule,
 ./atlas_viewer.py data/war-and-peace_atlas
 ```
 
-1. `book_index.py` fetches Project Gutenberg ebook 2600 (3.4 MB) into `data/gutenberg/pg2600.txt` on the first run and reads it from there after, drops Gutenberg's header and footer, and splits the text on its headings: reflows the prose to Letter pages, every paragraph re-broken word by word to the line width that makes a page of 40 lines Letter-shaped inside its margins, measured in the book's own face (the contents list, verse and headings keep their lines), and splits it on its headings: `BOOK ONE: 1805` and the two epilogues open a part, `CHAPTER I` a chapter, every 40 lines of a chapter are a page, padded to 40, with a running footer under a blank line, author, page number and title spaced across the page in the face's own widths, and chapter headings centred the same way. It writes `data/war-and-peace_atlas/index.npz` and `index.json`, the same index a source tree gets, with parts as directories and pages as files named `Book One: 1805/Chapter I/p. 17`, and the book's scheme, Dobbie's colours, white pages, black text, grey bars, his demo's blue-grey ground, and its face, Literata; and prints the counts: 18 parts, 366 chapters, 1,491 pages, 2.67 million glyphs, about a second.
+1. `book_index.py` fetches Project Gutenberg ebook 2600 (3.4 MB) into `data/gutenberg/pg2600.txt` on the first run and reads it from there after, drops Gutenberg's header and footer, and splits the text on its headings: reflows the prose to Letter pages, every paragraph re-broken word by word to the line width that makes a page of 40 lines Letter-shaped inside its margins, measured in the book's own face (the contents list, verse and headings keep their lines), and splits it on its headings: `BOOK ONE: 1805` and the two epilogues open a part, `CHAPTER I` a chapter, every 40 lines of a chapter are a page, padded to 40, with a running footer under two blank lines, author, page number and title spaced across the page in the face's own widths, and chapter headings centred the same way. It writes `data/war-and-peace_atlas/index.npz` and `index.json`, the same index a source tree gets, with parts as directories and pages as files named `Book One: 1805/Chapter I/p. 17`, and the book's scheme, Dobbie's colours, white pages, black text, grey bars, his demo's blue-grey ground, and its face, Literata; and prints the counts: 18 parts, 366 chapters, 1,467 pages, 2.67 million glyphs, about a second.
 2. `atlas_layout.py` sees `"corpus": "book"` in the index and lays the pages out in reading order instead of a treemap: one grid, as Dobbie's demo, every page one cell of one size in a gutter of 8 percent of its width, its text block inset by margins of 7.5 percent of the page's width, 9 percent of its height above and 3 below, the footer sitting in the bottom one, 58 pages across, the parts drawing nothing, and writes `layout.npz`, with lines as the book's one metric; `--book-layout parts` gives every part its own band of page rows instead. In 3D a book is one flat sheet, nothing extruded, the tilt just a way of looking at it. Add `--preview docs/shots/war-and-peace_layout.png` to render the result with Pillow without opening a window.
-3. `atlas_viewer.py` opens the book fitted to the window, its text in Literata at every size, glyphs placed by their own advances, and the hints and panel in the monospace face. Everything in Controls works: `/` filters (`Natasha` finds 1,213 mentions on 311 pages), Enter flies to the next hit, `3` tilts the sheet (a book has no heights in 3D), hover names the part, chapter and page under the cursor. There is no tint, since a book has no commits.
+3. `atlas_viewer.py` opens the book fitted to the window, its text in Literata at every size, glyphs placed by their own advances, and the hints and panel in the monospace face. Everything in Controls works: `/` filters (`Natasha` finds 1,213 mentions on 310 pages), Enter flies to the next hit, `3` tilts the sheet (a book has no heights in 3D), hover names the part, chapter and page under the cursor. There is no tint, since a book has no commits.
 
 The README's second image is the viewer scripted from the shell, and the opening pages are one flag away:
 
@@ -191,7 +191,7 @@ The tint over the fitted map: lines added and removed over the whole history, lo
 
 ### A book
 
-The same images for War and Peace, in `docs/shots/war-and-peace/`. The map fitted: one grid of 1,491 pages in reading order, 58 across, each page a white cell of one size in a grey gutter, the text the pale grey of its averaged ink.
+The same images for War and Peace, in `docs/shots/war-and-peace/`. The map fitted: one grid of 1,467 pages in reading order, 58 across, each page a white cell of one size in a grey gutter, the text the pale grey of its averaged ink.
 
 ![the book fitted](docs/shots/war-and-peace/overview.png)
 
@@ -199,7 +199,7 @@ The book opens: the contents on the front-matter pages, then `Book One: 1805` an
 
 ![the opening pages](docs/shots/war-and-peace/opening.png)
 
-The filter `Natasha`: 1,213 mentions on 311 pages, every page with one outlined in yellow, and the fly-to landing on the first, the hit filled yellow at text zoom.
+The filter `Natasha`: 1,213 mentions on 310 pages, every page with one outlined in yellow, and the fly-to landing on the first, the hit filled yellow at text zoom.
 
 ![Natasha filtered](docs/shots/war-and-peace/filter.png)
 ![the first mention](docs/shots/war-and-peace/result.png)
