@@ -4,7 +4,7 @@ big-text is the text-scale sibling of [big-picture](https://github.com/erik-lars
 
 ![big-text's own source in 3D, the tint colouring the most edited files ember](docs/shots/big-text/hero.png)
 
-*big-text viewing itself: 33 files and about 9,500 lines tilted into 3D with the tint on, the most edited files ember, every roof carrying its code at the rung its size allows.*
+*big-text viewing itself: 29 files and about 7,200 lines tilted into 3D with the tint on, the most edited files ember, every roof carrying its code at the rung its size allows.*
 
 ![War and Peace tilted at 3 pixels per line: one flat sheet of pages, the near ones as text, the far rows as line bars, the Books as coloured bands](docs/shots/war-and-peace/hero.png)
 
@@ -92,7 +92,7 @@ There is no build step. The scripts run in place, and the build is generating an
 
 ## Run
 
-Three steps: index a corpus, lay it out, view it. Everything generated lands under `data/`, which git ignores, and every step prints what it did and how long it took. The default example is big-text itself, 33 files and about 9,500 lines with this README among them, prepared in under a second:
+Three steps: index a corpus, lay it out, view it. Everything generated lands under `data/`, which git ignores, and every step prints what it did and how long it took. The default example is big-text itself, 29 files and about 7,200 lines with this README among them, prepared in under a second:
 
 ```bash
 ./atlas_index.py . --out data/big-text_atlas
@@ -100,7 +100,7 @@ Three steps: index a corpus, lay it out, view it. Everything generated lands und
 ./atlas_viewer.py data/big-text_atlas
 ```
 
-The index step reads the tree's git history in the same pass, one `git log --numstat`, and writes each file's lines added and removed as its tint; `--no-git` skips it, and a tree that is not a checkout gets no tint. For scale, clone makepad (300 MB) next to big-text and index its drawing and platform crates together, 493 files and 280,607 lines, or the whole tree, 7,145 files and 3.67 million lines (4 seconds to index, 0.4 to lay out, 380 MB on the GPU):
+The index step reads the tree's git history in the same pass, one `git log --numstat`, and writes each file's lines added and removed as its tint; `--no-git` skips it, and a tree that is not a checkout gets no tint. For scale, clone makepad (300 MB) next to big-text and index its drawing and platform crates together, 493 files and 280,607 lines, or the whole tree, 7,145 files and 3.67 million lines (8 seconds to index with the git pass, 2 to lay out, 385 MB on the GPU):
 
 ```bash
 git clone https://github.com/makepad/makepad.git ../makepad
@@ -163,7 +163,7 @@ The four rungs, from the fitted map through 2, 4.5 and 16 device pixels per line
 ![tokens](docs/shots/big-text/tokens.png)
 ![text](docs/shots/big-text/text.png)
 
-The filter `Viewer`: the three files that mention it outlined in yellow, the rest dimmed, the panel listing the hits by file; then the view after stepping to the first hit, filled yellow at text zoom.
+The filter `Viewer`: the five files that mention it outlined in yellow, the rest dimmed, the panel listing the 14 hits by file; then the view after stepping to the first hit, filled yellow at text zoom.
 
 ![filter](docs/shots/big-text/filter.png)
 ![result](docs/shots/big-text/result.png)
@@ -207,7 +207,7 @@ The filter `Natasha`: 1,213 mentions on 299 pages, every page with one outlined 
 How each stage is built is in [docs/DESIGN.md](docs/DESIGN.md). The short version:
 
 - **Index.** `atlas_index.py` walks the tree (honouring `.gitignore`, skipping binaries and submodules), expands tabs, maps every character to one column, and runs a small regex tokenizer per language family (Rust, C-like, Python, shell, plain) that gives every character one of ten kinds. Items (functions, structs, enums, impls, modules) come from regexes with brace or indentation matching. The output is a handful of numpy arrays: characters, kinds, line offsets, file ranges, item ranges, and the tint. `book_index.py` writes the same index from a Project Gutenberg text: a heading line such as `BOOK ONE: 1805` opens a part, `CHAPTER I` a chapter, and every 52 lines of a chapter are a page, the file, named `Book One: 1805/Chapter I/p. 17`; the text is kept as Gutenberg wrapped it and normalised to ASCII (curly quotes straight, the em dash two hyphens, accents stripped, so Natásha is Natasha until the glyph tiers cover more than ASCII), and words are the identifier kind, with no string literals and no items.
-- **The tint.** In a git checkout the index step runs one `git log --numstat` over the indexed directories (half a second for the 689 commits touching makepad's draw and platform crates), sums each file's lines added and removed, a rename counting as a removal and an addition, and writes the sums on a log scale to 0..1 as the tint, labelled `churn`. The viewer knows only that a leaf has a number in 0..1 and a label: it maps the number to ember over the file fill and shows the label in the status line. A book writes no tint.
+- **The tint.** In a git checkout the index step runs one `git log --numstat` over the indexed directories (under a second for the 724 commits touching makepad's draw and platform crates), sums each file's lines added and removed, a rename counting as a removal and an addition, and writes the sums on a log scale to 0..1 as the tint, labelled `churn`. The viewer knows only that a leaf has a number in 0..1 and a label: it maps the number to ember over the file fill and shows the label in the status line. A book writes no tint.
 - **Layout.** `atlas_layout.py` is a squarified treemap over the directory tree with padding per level, which the viewer draws as the directory band, so the bands widen as you zoom. Each file's area is its weight, tokens for code. Each file is wrapped into as many equal columns as keep a 90th-percentile line width readable; lines longer than a column wrap inside it, continuation rows hanging in by two characters. `tests/check_layout.py` checks the invariants. A book skips the treemap: its parts are full-width bands of whole page rows in reading order, every page one cell of the size that lets one column hold the book's line width, so 65 pages across for War and Peace, and every page pitched as a full page so a short last page keeps its chapter's text size.
 - **The ladder.** Per frame the viewer computes device pixels per line for every file and picks a rung: under 1, sampled one-pixel bars; 1 to 3, one grey bar per line from indent to length, with items as filled bands in their kind colour beneath; 3 to 6, one block per character in its kind colour plus item outlines; 6 and up, glyphs. The switches are hard cuts, as in the video. Everything is resident: characters and kinds as 8-bit textures, lines and files as float and integer textures, one instanced quad per line drawn per run of visible files.
 - **Glyphs.** `atlas_font.py` rasterises the 95 printable ASCII glyphs of one monospace face into a mipmapped atlas that also draws the UI; the line box is the face's ASCII ink extents rather than its OS/2 box, so a change of face does not change the proportions of the layout. `vt_glyphs.py` builds the vector tier's data in Slug's form: quadratic outlines from fontTools as float32 control points in a curve texture, and per glyph horizontal and vertical bands over its ink box, each listing the curves that cross it sorted for the shader's early exit. `shaders/vt_glyph.glsl` is a GLSL translation of the reference pixel shader: the sign-bit root rule, two axis rays with a box filter, the weighted combination.
@@ -216,7 +216,7 @@ How each stage is built is in [docs/DESIGN.md](docs/DESIGN.md). The short versio
 - **3D.** Every world shader takes one model-view-projection matrix, orthographic in 2D and perspective in 3D, so the flat view is unchanged. The camera orbits a focus point at tilt and yaw, at a distance chosen so one world unit at the focus is the same number of pixels as in 2D, which keeps the zoom semantics and the per-file rung: a file's pixels per line is foreshortened by its depth, so one frame has text near and bars far. Directories are terraces, files rise from their terrace by the square root of their weight, an instanced wall pass draws the sides shaded by which way they face, and the focus height rides on the roof of the file under the centre so a close camera never ends up inside a building. A layout can declare itself flat, as the book's does, and then the tilt is only a way of looking at the sheet.
 - **The window.** The map's viewport is the window minus a top strip (the filter box), a bottom strip (crumb trail and status) and the right column while the panel is open, so the fitted map is clear of every control. The window is sized to the screen's work area explicitly, which makes the framebuffer the same in every run and the screenshots reproducible.
 
-Measured on an M4 MacBook at a 2940 by 1640 framebuffer, `--frames 300 --stats` over the scripted zoom from fit to text: makepad-draw 1.6 ms mean and 4.4 ms 99th percentile; the full makepad tree 4.5 and 23.7 ms, the tail being the fitted view where all 3.67 million lines are visible, and 1.3 ms once zoomed to text.
+Measured on an M4 MacBook at a 2940 by 1640 framebuffer, `--frames 300 --stats` over the scripted zoom from fit to text: makepad-draw 1.9 ms mean and 5.8 ms 99th percentile; the full makepad tree 6.9 and 37 ms, the tail being the fitted view where all 3.67 million lines are visible, and 3.1 ms once zoomed to text.
 
 `tests/bench_vt.py` measures the vector tier against the raster tier (the 64 px mipmapped atlas sampled as the text rung samples it) on the bundled face, against the exact coverage of the same string: Pillow at eight times the size, box-filtered down, since a hinted reference at the target size favours the raster tier, which is itself a Pillow render. Error is the mean absolute coverage difference over the whole image and over ink pixels; time is one full 2940 by 1640 screen of glyph cells, the best of five batches of fifty draws; sparkle is the number of pixels whose coverage jumps by more than a quarter between neighbouring sub-pixel offsets 0.1 px apart, which a one-pixel box filter cannot do on an edge.
 
