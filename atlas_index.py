@@ -5,18 +5,22 @@ Walks the tree (git ls-files inside a repo, a plain walk otherwise), keeps the
 text files, normalises every line to printable ASCII (tabs to 4 spaces, one
 byte per column, trailing whitespace stripped, 4096 columns at most), runs a
 small per-language tokenizer that gives every character a kind, and finds the
-items (fn, struct, def, class ...) with their line extents.
+items (fn, struct, def, class ...) with their line extents. Inside a git
+checkout one `git log --numstat` over the indexed directories gives every
+file its tint: lines added and removed over the whole history, on a log
+scale to 0..1, labelled "churn" in index.json; --no-git skips it.
 
 Files are ordered so that a directory's own files and all of its descendants'
 files are one contiguous range, and so are their lines. See docs/DESIGN.md
 for the exact arrays and JSON keys.
 
-  ./atlas_index.py big-picture --out data/big-picture_atlas
-  ./atlas_index.py makepad/draw makepad/platform --out data/makepad-draw_atlas
+  ./atlas_index.py . --out data/big-text_atlas
+  ./atlas_index.py ../makepad/draw ../makepad/platform --out data/makepad-draw_atlas
 """
 import argparse
 import fnmatch
 import json
+import math
 import os
 import re
 import subprocess
@@ -552,11 +556,43 @@ def build_tree(relpaths):
 
 # ---------------------------------------------------------------- main
 
-def write_index(out, name, root, dirs, files, file_dir, results, skipped, seconds, extra=None):
+def git_churn(root, subdirs, files):
+    """The code adapter's tint: lines added and removed per file over the
+    whole git history of the indexed directories, on a log scale to 0..1.
+    (tint, commits), or (None, 0) when root is not inside a repository."""
+    try:
+        toplevel = subprocess.run(["git", "-C", root, "rev-parse", "--show-toplevel"], check=True,
+                                  capture_output=True, text=True).stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None, 0
+    prefix = os.path.relpath(os.path.realpath(root), os.path.realpath(toplevel))
+    prefix = "" if prefix == "." else prefix + "/"
+    index = {prefix + rel: i for i, rel in enumerate(files)}
+    specs = [prefix + sd if sd else (prefix.rstrip("/") or ".") for sd in subdirs]
+    # renames are not followed on purpose: a rename is a removal and an addition
+    text = subprocess.run(["git", "log", "--numstat", "--no-renames", "--format=%H", "--"] + specs,
+                          cwd=toplevel, check=True, capture_output=True, text=True).stdout
+    churn = np.zeros(len(files), np.float64)
+    commits = 0
+    for line in text.split("\n"):
+        parts = line.split("\t", 2)
+        if len(parts) != 3:
+            commits += bool(line)
+            continue
+        i = index.get(parts[2], -1)
+        if i >= 0:                        # '-' is a binary: no line counts
+            churn[i] += (0 if parts[0] == "-" else int(parts[0])) + (0 if parts[1] == "-" else int(parts[1]))
+    tint = np.log1p(churn) / max(math.log1p(float(churn.max())), 1e-9)
+    return tint.astype(np.float32), commits
+
+
+def write_index(out, name, root, dirs, files, file_dir, results, skipped, seconds, extra=None,
+                tint=None, tint_label=None):
     """Assemble the index arrays from one ("ok", ...) tuple per file (see
     index_file) and write out/index.npz + index.json; `extra` is merged
     into the JSON (a corpus adapter's own keys, such as book_index.py's
-    "corpus"). Returns the stats dict."""
+    "corpus"); `tint` is a float per file in 0..1 written as file_tint
+    with its one-word label as "tint" in the JSON. Returns the stats dict."""
     n_files = len(files)
     chars = b"".join(r[4] for r in results)
     kinds = b"".join(r[5] for r in results)
@@ -586,7 +622,8 @@ def write_index(out, name, root, dirs, files, file_dir, results, skipped, second
              line_off=line_off, line_file=line_file, line_indent=line_indent, line_len=line_len,
              file_line0=file_line0, file_chars=file_chars,
              file_dir=np.array(file_dir, np.uint32),
-             item_file=item_file, item_start=item_start, item_end=item_end, item_kind=item_kind)
+             item_file=item_file, item_start=item_start, item_end=item_end, item_kind=item_kind,
+             **({"file_tint": np.asarray(tint, np.float32)} if tint is not None else {}))
 
     meta = {
         "root": root, "name": name,
@@ -600,6 +637,8 @@ def write_index(out, name, root, dirs, files, file_dir, results, skipped, second
                   "skipped_large": skipped["large"], "skipped_submodules": skipped["submodules"],
                   "seconds": seconds},
     }
+    if tint is not None:
+        meta["tint"] = tint_label
     if extra:
         meta.update(extra)
     with open(os.path.join(out, "index.json"), "w") as f:
@@ -626,8 +665,8 @@ def main():
     ap.add_argument("--submodules", action="store_true",
                     help="descend into git submodules and nested repos (default: skip them)")
     ap.add_argument("--no-git", action="store_true",
-                    help="walk the tree instead of asking git which files it tracks (for a tree "
-                         "extracted under an ignored directory, such as a revision's cache)")
+                    help="walk the tree instead of asking git which files it tracks, and skip "
+                         "the git pass that gives every file its tint")
     args = ap.parse_args()
 
     srcs = [os.path.abspath(s) for s in args.src]
@@ -696,15 +735,18 @@ def main():
         dirs, files, file_dir = build_tree(kept)
         results = [by_rel[rel] for rel in files]
 
+    tint, commits = (None, 0) if args.no_git else git_churn(root, subdirs, files)
     seconds = round(time.time() - t0, 2)
-    stats = write_index(args.out, args.name, root, dirs, files, file_dir, results, skipped, seconds)
+    stats = write_index(args.out, args.name, root, dirs, files, file_dir, results, skipped, seconds,
+                        tint=tint, tint_label="churn" if tint is not None else None)
     n_files, n_lines, n_chars = stats["files"], stats["lines"], stats["chars"]
     langs = {}
     for r in results:
         langs[r[3]] = langs.get(r[3], 0) + 1
     print(f"wrote {args.out}/index.npz + index.json: {n_files} files ({langs}), {len(dirs)} dirs, "
           f"{n_lines} lines, {n_chars / 1e6:.2f} M chars, {stats['items']} items, "
-          f"skipped {skipped}, {seconds}s")
+          f"skipped {skipped}, {seconds}s"
+          + (f"; tint: churn over {commits} commits" if tint is not None else "; no tint (not a git checkout)"))
 
 
 if __name__ == "__main__":

@@ -94,8 +94,6 @@ def main():
           f"filter {word!r} found {0 if v.results is None else len(v.results['order'])} hits")
     check(bool(v.hits_by_file.any()) and bool(v.dimmed.any()), "hit files flagged, others dimmed")
     check(len(v.panel_rows) > 2, f"results panel has {len(v.panel_rows)} rows")
-    n_def = int(v.results["is_def"].sum())
-    check(n_def >= 1, f"{n_def} definitions among the hits")
 
     # a click in the filter box focuses it; a click on a result row flies there
     v.filter_focus = False
@@ -123,7 +121,7 @@ def main():
     t0 = time.perf_counter()
     while v.fly is not None and time.perf_counter() - t0 < 3:
         frames(v, 1)
-    f, line, col, ln, is_def, kind = v.result(0)
+    f, line, col, ln = v.result(0)
     x0, y0, x1, y1 = v.view()
     row, _ = v.row_of(line, col)
     lx, ly = v.a["row_pos"][int(row)]
@@ -133,7 +131,7 @@ def main():
     v.on_key(w, glfw.KEY_UP, 0, glfw.PRESS, 0)
     check(v.result_i == len(v.results["order"]) - 1, "Up wraps to the last result")
 
-    # Escape clears the filter, then the selection
+    # Escape clears the filter
     v.on_key(w, glfw.KEY_ESCAPE, 0, glfw.PRESS, 0)
     frames(v, 1)
     check(v.filter_text == "" and v.results is None and not v.dimmed.any(),

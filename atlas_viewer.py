@@ -1,20 +1,27 @@
 #!/usr/bin/env python3
-"""Stage 4: the code atlas viewer.
+"""Stage 3: the viewer.
 
-Draws a source tree laid out by atlas_layout.py as a zoomable treemap with
-a ladder of representations chosen per file from its size on screen:
-sampled one pixel line bars over a dark tile (under 1 device pixel per
-line), grey line bars (1 to 3), coloured token segments (3 to 6) and glyphs
-from the raster atlas (6 and up). All
-lines, tokens and characters of the corpus are resident on the GPU as
-integer and float textures; every frame is a handful of instanced draws
-whose vertex shaders cull by rung and view.
+Draws a corpus laid out by atlas_layout.py as one zoomable surface with a
+ladder of representations chosen per file from its size on screen: sampled
+one pixel line bars over a dark tile (under 1 device pixel per line), grey
+line bars (1 to 3), coloured token segments (3 to 6) and glyphs (6 and up),
+from the raster atlas and, from VT_MIN_PPL, the vector tier. All lines,
+tokens and characters of the corpus are resident on the GPU as integer and
+float textures; every frame is a handful of instanced draws whose vertex
+shaders cull by rung and view.
+
+The viewer does not know which corpus it shows. The index gives it a
+hierarchy, the leaves' lines with a kind per character, the items, and an
+optional tint per leaf with a one-word label; the layout gives it the
+rectangles, a weight per leaf and whether the sheet is flat.
 
 Controls: wheel = zoom about the cursor (with a glide) | drag = pan
           hover = file / line / item label | R = refit | Q = quit
           / = focus the filter box, type to search, Backspace edits
-          Enter, Down, ] = next result | Up, [ = previous result
-          click a result row = fly there | Escape = clear filter, then selection
+          Enter, Down, ] = next hit | Up, [ = previous hit
+          click a hit in the panel = fly there | Escape = clear the filter
+          3 = the tilted projection on and off | Alt-drag = tilt and turn
+          C = the tint on and off, when the corpus has one
 """
 import argparse
 import ctypes
@@ -34,11 +41,6 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import atlas_font  # noqa: E402
-import atlas_history  # noqa: E402
-import shutil  # noqa: E402
-import subprocess  # noqa: E402
-import tempfile  # noqa: E402
-from datetime import datetime, timezone  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 CHARS_W = 16384          # width of tex_chars / tex_kinds, shared with line.glsl
@@ -47,7 +49,6 @@ ZOOM_TAU = 0.12          # glide time constant, seconds
 ZOOM_TICK = math.log(1.2) / ZOOM_TAU    # one wheel unit ends up as x1.2
 ZOOM_VMAX = 12.0         # log-zoom per second at most
 PANEL_PT = 180           # results panel width in window points
-RAIL_PT = 22             # revision rail height in window points
 MARGIN_PT = 10           # UI margin in window points
 FLY_RHO = 1.4
 FOVY = 45.0              # 3D camera field of view, degrees
@@ -55,7 +56,7 @@ H_MAX = 90.0             # tallest file in world units (the world is 1600 wide)
 DIR_STEP = 5.0           # terrace height per directory level
 TILT_MAX = 70.0
 FLY_V = 10.0             # van Wijk path units per second
-VT_MIN_PPL = 12.0        # --vector-text draws glyphs with the vector tier from here: the smallest size measured
+VT_MIN_PPL = 12.0        # the vector tier draws glyphs from here: the smallest size measured
                          # by tests/bench_vt.py at which its error is below the raster tier's
 
 
@@ -76,14 +77,10 @@ ITEM_KW_RX = re.compile(r"\b(fn|struct|enum|trait|impl|mod|macro_rules|type|cons
 ITEM_NAMES = {"rust": ["fn", "struct", "enum", "impl", "mod"],
               "python": ["def", "class", "enum", "impl", "mod"],
               None: ["function", "struct", "enum", "interface", "module"]}
-DEF_KW = {"rust": b"fn|struct|enum|trait|impl|type|mod|const|static",
-          "python": b"def|class",
-          None: b"fn|struct|enum|trait|impl|type|mod|def|class|function|interface|const|static"}
 YELLOW = rgb("e8d44d")
 UI_TEXT = rgb("e6e6e6")
 UI_BOX = rgb("2a2a2e")
 UI_DIM = rgb("8c909a")
-TEAL_UI = rgb("5fb7b7")      # the compare revision on the rail, the neighbour teal
 
 
 # ---------------------------------------------------------------- GL helpers
@@ -171,10 +168,6 @@ def instanced_vao(quad_vbo, attribs):
 
 # ---------------------------------------------------------------- data
 
-def rev_date(t):
-    return datetime.fromtimestamp(int(t), timezone.utc).strftime("%Y-%m-%d")
-
-
 def check_atlas(d):
     d = Path(d)
     missing = [n for n in ("index.npz", "index.json", "layout.npz", "layout.json")
@@ -187,129 +180,19 @@ def check_atlas(d):
                          "    ./tests/gen_synthetic_atlas.py         # or a synthetic one")
 
 
-LAYOUT_KEYS = ("world", "dir_rect", "dir_pad", "dir_depth", "dir_hue", "file_rect", "file_pitch",
-               "file_cols", "file_rows", "file_cap", "file_colw", "file_hue", "file_row0",
-               "line_row0", "row_line", "row_col0", "row_len", "row_pos", "item_rect",
-               "item_rect_item", "layout")
-METRIC_ORDER = ["tokens", "references", "churn", "lines", "chars", "bytes"]
-LENSES = ["none", "churn", "age", "changes"]   # the colour lenses, C cycles them
-
-
-def load_layouts(d):
-    """{metric: layout dict} for layout.npz (tokens) and every layout_<metric>.npz."""
-    d = Path(d)
-    out = {}
-    for npz in sorted(d.glob("layout*.npz")):
-        stem = npz.stem
-        js = json.loads((d / (stem + ".json")).read_text())
-        ly = np.load(npz)
-        L = {k: ly[k] for k in ly.files}
-        L["layout"] = js
-        if "row_pos" not in L:
-            raise SystemExit(f"error: {npz} predates wrapped rows; rerun ./atlas_layout.py {d}")
-        out["layers" if js.get("lens") == "layers" else js.get("metric", "tokens")] = L
-    if not out:
-        raise SystemExit(f"error: no layout.npz in {d}; run ./atlas_layout.py {d}")
-    return out
-
-
-def load_atlas(d, metric=None):
+def load_atlas(d):
+    """The index and the layout as one dict of arrays, plus 'index' and
+    'layout' for the two JSON files."""
     d = Path(d)
     ix = np.load(d / "index.npz")
     a = {k: ix[k] for k in ix.files}
     a["index"] = json.loads((d / "index.json").read_text())
-    a["layouts"] = load_layouts(d)
-    metric = metric if metric in a["layouts"] else ("tokens" if "tokens" in a["layouts"] else next(iter(a["layouts"])))
-    a["metric"] = metric
-    a.update(a["layouts"][metric])
+    ly = np.load(d / "layout.npz")
+    a.update({k: ly[k] for k in ly.files})
+    a["layout"] = json.loads((d / "layout.json").read_text())
+    if "row_pos" not in a:
+        raise SystemExit(f"error: {d}/layout.npz predates wrapped rows; rerun ./atlas_layout.py {d}")
     return a
-
-
-def csr(src, dst, n):
-    """(ptr, idx) adjacency of src -> dst edges, sorted by src."""
-    order = np.argsort(src, kind="stable")
-    ptr = np.zeros(n + 1, np.int64)
-    np.add.at(ptr, src + 1, 1)
-    return np.cumsum(ptr), dst[order]
-
-
-RESOLVED = {"local", "file", "import", "crate", "global", "generic", "self"}
-
-
-def load_resolve(d, atlas):
-    """resolve.npz/json from atlas_resolve.py, if present: entity and
-    reference tables, sorted per file for the hover lookup, plus counts."""
-    d = Path(d)
-    if not (d / "resolve.npz").exists():
-        return None
-    z = np.load(d / "resolve.npz")
-    r = {k: z[k] for k in z.files}
-    j = json.loads((d / "resolve.json").read_text())
-    r.update(names=j["names"], kinds=j["kinds"], statuses=j["statuses"],
-             crates=j["crates"], stats=j["stats"])
-    r["name_id"] = {n: i for i, n in enumerate(r["names"])}
-    r["resolved_status"] = np.array([st in RESOLVED for st in r["statuses"]])
-    line0 = atlas["file_line0"].astype(np.int64)
-    for kind in ("ent", "ref"):
-        f, ln, col = r[kind + "_file"].astype(np.int64), r[kind + "_line"].astype(np.int64), r[kind + "_col"].astype(np.int64)
-        order = np.lexsort((col, ln, f))
-        r[kind + "_order"] = order
-        r[kind + "_key"] = (f[order] << 40) | (ln[order] << 16) | col[order]
-        r[kind + "_gline"] = line0[f] + ln                    # global line per entry
-    ok = r["ref_ent"] >= 0
-    r["ent_refs"] = np.bincount(r["ref_ent"][ok], minlength=len(r["ent_file"]))
-    r["defs_by_name"] = np.bincount(r["ent_name"], minlength=len(r["names"]))
-    # the file graph: A -> B when a reference in A resolves into B
-    n = len(atlas["file_line0"]) - 1
-    src = r["ref_file"][ok].astype(np.int64)
-    dst = r["ent_file"][r["ref_ent"][ok]].astype(np.int64)
-    m = src != dst
-    key = np.unique(src[m] * n + dst[m])
-    es, ed = key // n, key % n
-    r["out_ptr"], r["out_idx"] = csr(es, ed, n)
-    r["in_ptr"], r["in_idx"] = csr(ed, es, n)
-    return r
-
-
-def symbol_at(res, f, j, col):
-    """('ent' or 'ref', index) of the identifier covering column col of
-    file-relative line j of file f, else None."""
-    for kind in ("ent", "ref"):
-        key, order = res[kind + "_key"], res[kind + "_order"]
-        k = (f << 40) | (j << 16)
-        lo, hi = np.searchsorted(key, k), np.searchsorted(key, k | 0xFFFF, side="right")
-        for i in order[lo:hi]:
-            c0, ln = int(res[kind + "_col"][i]), int(res[kind + "_len"][i])
-            if c0 <= col < c0 + ln:
-                return kind, int(i)
-    return None
-
-
-def symbol_search(atlas, res, word):
-    """Results for a word that names entities: the definitions (with their
-    kinds) and every reference of that name, tagged with its status when it
-    did not resolve. Same shape as run_search's result."""
-    nm = res["name_id"].get(word)
-    if nm is None:
-        return None
-    ents = np.flatnonzero(res["ent_name"] == nm)
-    ents = ents[~np.isin(res["ent_kind"][ents], [res["kinds"].index("local"), res["kinds"].index("param")])]
-    refs = np.flatnonzero(res["ref_name"] == nm)
-    if len(ents) == 0 and len(refs) == 0:
-        return None
-    file = np.concatenate((res["ent_file"][ents], res["ref_file"][refs])).astype(np.int64)
-    line = np.concatenate((res["ent_gline"][ents], res["ref_gline"][refs])).astype(np.int64)
-    col = np.concatenate((res["ent_col"][ents], res["ref_col"][refs])).astype(np.int64)
-    is_def = np.concatenate((np.ones(len(ents), bool), np.zeros(len(refs), bool)))
-    kinds = [res["kinds"][k] for k in res["ent_kind"][ents]]
-    kinds += ["" if res["resolved_status"][st] else res["statuses"][st] for st in res["ref_status"][refs]]
-    return {"file": file, "line": line, "col": col, "len": len(word), "is_def": is_def,
-            "kind": kinds, "word": word, "symbols": True}
-
-
-def def_regex(lang, word):
-    kw = DEF_KW.get(lang, DEF_KW[None])
-    return re.compile(rb"\b(" + kw + rb")\s+(?:<[^>]*>\s*)?" + re.escape(word) + rb"\b")
 
 
 def joined_lines(atlas):
@@ -329,9 +212,9 @@ def joined_lines(atlas):
 
 
 def run_search(atlas, word):
-    """Whole-word substring search over the corpus bytes. Returns a dict of
-    arrays (file, line, col, len, is_def) plus per-hit kind strings, or
-    None when the word is too short."""
+    """Whole-word search over the corpus bytes. Returns a dict of arrays
+    (file, line, col) plus the hit length and the word, or None when the
+    word is too short."""
     if len(word) < 2:
         return None
     w = word.encode("ascii", "replace")
@@ -350,28 +233,12 @@ def run_search(atlas, word):
     off = np.array(starts, np.int64)
     line = np.searchsorted(line_off_nl, off, side="right") - 1
     col = off - line_off_nl[line]
-    chars = atlas["chars"]
     line_off = atlas["line_off"].astype(np.int64)
-    # a mention inside a comment or a string is not a reference
+    # a mention inside a comment or a string is not a hit
     code = ~np.isin(atlas["kinds"][line_off[line] + col], (4, 5))
     line, col = line[code], col[code]
     file = atlas["line_file"][line].astype(np.int64)
-    is_def = np.zeros(len(line), bool)
-    kinds = [""] * len(line)
-    files = atlas["index"]["files"]
-    regs = {}
-    for i in range(len(line)):
-        lang = files[file[i]]["lang"]
-        r = regs.get(lang)
-        if r is None:
-            r = regs[lang] = def_regex(lang, w)
-        text = chars[line_off[line[i]]:line_off[line[i] + 1]].tobytes()
-        m = r.search(text)
-        if m:
-            is_def[i] = True
-            kinds[i] = m.group(1).decode()
-    return {"file": file, "line": line, "col": col, "len": len(w),
-            "is_def": is_def, "kind": kinds, "word": word}
+    return {"file": file, "line": line, "col": col, "len": len(w), "word": word}
 
 
 def load_vector_tier(font, index):
@@ -401,32 +268,15 @@ class Viewer:
         self.args = args
         self.scripted = args.frames is not None or args.shots or args.stats
         t0 = time.perf_counter()
-        self.a = load_atlas(args.atlas, "layers" if getattr(args, "lens", None) == "layers"
-                            else getattr(args, "metric", None))
-        a = self.a
-        self.res = load_resolve(args.atlas, a)
-        # history (phase 5): the colour lenses and the revision rail
-        self.hist = atlas_history.load(args.atlas)
-        self.head_dir = str(args.atlas)
-        self.head = (a, self.res)          # the atlas on disk, to return to from a revision
-        self.head_paths = {f["path"]: i for i, f in enumerate(a["index"]["files"])}
-        self.rev_i = 0                     # index into the revision table, 0 = newest = HEAD
-        self.compare_i = None              # the second revision of the Changes lens
-        self.rev_loading = None            # revision index while a thread indexes it
-        self.rev_enriching = None          # revision index while a thread resolves it
-        self.rev_q = queue.Queue()
-        self.color = getattr(args, "color", None) or "none"
-        self.since_days = getattr(args, "since", None)
-        self.rail_show = bool(getattr(args, "history", False))
-        self.rail_rect = None
-        self.rail_xs = np.zeros(0)
-        self.rail_hover = None
-        self.removed = []
-        self.filter_text = ""
+        self.a = a = load_atlas(args.atlas)
+        # the tint: a number in 0..1 per file and a label, when the index has them
+        self.tint = a.get("file_tint")
+        self.tint_label = a["index"].get("tint") if self.tint is not None else None
+        self.tint_on = self.tint is not None and bool(getattr(args, "tint", False))
         self.hang = int(a["layout"].get("hang", 2))
         # projection: 2d is orthographic; 3d is a perspective camera that
         # orbits the focus point (cx, cy) at tilt and yaw, with files and
-        # directories extruded by the metric
+        # directories extruded by their weight
         self.proj = getattr(args, "proj", None) or "2d"
         self.tilt = float(getattr(args, "tilt", None) if getattr(args, "tilt", None) is not None
                           else (55.0 if self.proj == "3d" else 0.0))
@@ -439,8 +289,7 @@ class Viewer:
         self.W, self.H = (float(v) for v in a["world"])
         self.A = float(a["layout"].get("char_aspect", 0.6))
         self.name = a["index"].get("name", Path(args.atlas).name)
-        self.marquee = None
-        self.attach_atlas(a, self.res)
+        self.attach_atlas(a)
         self.glyphs, self.gm = atlas_font.build_atlas(args.font, args.font_index, 64)
         self.ui_aspect = self.gm["cell_w"] / self.gm["cell_h"]
         self.vt = load_vector_tier(args.font, args.font_index) if args.vector_text else None
@@ -468,34 +317,21 @@ class Viewer:
         self.filter_focus = False
         self.swallow_char = False
         self.results = None           # dict from run_search + ordering
-        self.hits_by_file = np.zeros(self.n_files, bool)
-        self.hit_count = np.zeros(self.n_files, np.int64)
-        self.dimmed = np.zeros(self.n_files, bool)
         self.current_file = -1
         self.result_i = -1
         self.panel_rows = []
-        self.result_rows = []
-        self.inspector_open = False
-        self.selected = None          # entity index in the resolver tables
         self.panel_scroll = 0
         self.panel_rect = None
         self.filter_rect = None
-        self.toolbar = []
         self.search_gen = 0
         self.search_q = queue.Queue()
         self.frame_times = []
-        self.rung = np.zeros(self.n_files, np.uint8)
-        self.visible = np.zeros(self.n_files, bool)
         self.fit()
 
     # ---- the corpus -----------------------------------------------------
-    def attach_atlas(self, a, res):
-        """Everything derived from the atlas on the CPU. Called once at start
-        and again when a revision replaces the corpus."""
-        self.a, self.res = a, res
-        self.metrics = [m for m in METRIC_ORDER if m in a["layouts"]]
-        self.has_layers = "layers" in a["layouts"]
-        self.folders_metric = a["metric"] if a["metric"] != "layers" else "tokens"
+    def attach_atlas(self, a):
+        """Everything derived from the atlas on the CPU."""
+        self.a = a
         self.n_files = len(a["file_rect"])
         self.n_lines = len(a["line_file"])
         self.n_rows = len(a["row_pos"])
@@ -510,9 +346,6 @@ class Viewer:
         self.paths = [f["path"] for f in a["index"]["files"]]
         self.langs = [f.get("lang") for f in a["index"]["files"]]
         self.refresh_dirs()
-        self.sel = np.zeros(self.n_files, bool)       # selected files
-        self.nb = np.zeros(self.n_files, bool)        # their neighbourhood in the file graph
-        self.selected = None
         self.item_names = [it["name"] for it in a["index"]["items"]]
         self.build_dir_tags()
         self.item_rect_file = a["item_file"][a["item_rect_item"]]
@@ -528,343 +361,56 @@ class Viewer:
         self.hits_by_file = np.zeros(self.n_files, bool)
         self.hit_count = np.zeros(self.n_files, np.int64)
         self.dimmed = np.zeros(self.n_files, bool)
-        self.current_file = -1
-        self.result_i = -1
-        self.results = None
-        self.result_rows = []
         self.rung = np.zeros(self.n_files, np.uint8)
         self.visible = np.zeros(self.n_files, bool)
-        self.compute_lens()
 
-    def swap_atlas(self, a, res):
-        """Replace the corpus with another revision's atlas (or HEAD's) and
-        rebuild every GPU texture: a hard cut, as with the layouts. The
-        world is the same size, so the camera stays; the filter re-runs on
-        the new corpus; the selection is cleared (file indices change)."""
-        self.attach_atlas(a, res)
-        glDeleteTextures(2, [self.tex_chars, self.tex_kinds])
-        chars = padded_rows(a["chars"], CHARS_W)
-        self.tex_chars = texture_2d(GL_R8UI, GL_RED_INTEGER, GL_UNSIGNED_BYTE, chars)
-        self.tex_kinds = texture_2d(GL_R8UI, GL_RED_INTEGER, GL_UNSIGNED_BYTE,
-                                    padded_rows(a["kinds"], CHARS_W))
-        self.upload_layout()
-        glDeleteTextures(1, [self.tex_file_u])
-        self.file_u = padded_rows(np.zeros((self.n_files, 4), np.uint8), TEX_W)
-        self.tex_file_u = texture_2d(GL_RGBA8UI, GL_RGBA_INTEGER, GL_UNSIGNED_BYTE, self.file_u)
-        self.bind_textures()
-        self.hover = None
-        self.z_focus = 0.0
-        self.marquee = None
-        self.panel_scroll = 0
-        self.refresh_panel()
-        if len(self.filter_text) >= 2:
-            self.set_filter(self.filter_text, sync=self.scripted)
+    def refresh_dirs(self):
+        """Directory labels, parents and children of the layout."""
+        a = self.a
+        jd = a["layout"]["dirs"]
+        self.dir_labels = [d["label"] for d in jd]
+        if jd and "parent" in jd[0]:
+            self.dir_parent = np.array([d["parent"] for d in jd], np.int64)
+            self.dir_children = [d["children"] for d in jd]
+        else:
+            self.dir_parent = np.array([d["parent"] for d in a["index"]["dirs"]], np.int64)
+            self.dir_children = [d["children"] for d in a["index"]["dirs"]]
 
-    # ---- history: colour lenses and the revision rail ----------------------
-    def head_index(self):
-        """Per file of the loaded corpus, its index in HEAD's file table (the
-        history arrays are HEAD-indexed), or -1 for a file HEAD no longer has."""
-        if self.rev_i == 0:
-            return np.arange(self.n_files)
-        return np.array([self.head_paths.get(p, -1) for p in self.paths], np.int64)
+    def compute_heights(self):
+        """z base and height per file and directory from the layout's
+        weight: directories are terraces of DIR_STEP per level, files sit on
+        their directory's terrace with a height of H_MAX * sqrt(weight /
+        max). A flat layout (a book) has no heights at all: its 3D view is
+        the sheet tilted, nothing extruded."""
+        a = self.a
+        depth = a["dir_depth"].astype(np.float64)
+        flat = bool(a["layout"].get("flat", False))
+        self.dir_z0 = np.maximum(depth - 1, 0) * (0.0 if flat else DIR_STEP)
+        self.dir_h = np.where(depth >= 1, 0.0 if flat else DIR_STEP, 0.0)
+        top = self.dir_z0 + self.dir_h
+        m = a.get("file_weight")
+        if m is None:
+            m = np.ones(self.n_files)
+        m = np.asarray(m, np.float64)
+        self.file_h = H_MAX * np.sqrt(np.maximum(m, 0) / max(float(m.max()), 1e-9))
+        if flat:
+            self.file_h[:] = 0.0
+        self.file_z0 = top[a["file_dir"]]
+        self.file_top = self.file_z0 + self.file_h
 
-    def compute_lens(self):
-        """The per-file value in [0, 1] and class of the active colour lens,
-        for the two free channels of the file's third texel."""
-        n = self.n_files
-        self.lens_v = np.zeros(n, np.float32)
-        self.lens_c = np.zeros(n, np.float32)
-        self.removed = []
-        self.change_counts = (0, 0, 0)
-        h = self.hist
-        if h is None or self.color == "none":
+    def set_tint(self, on):
+        if self.tint is None:
             return
-        hi = self.head_index()
-        ok = hi >= 0
-        src = hi[ok]
-        if self.color == "churn":
-            c = atlas_history.churn(h, None if not self.since_days else self.since_days * 86400)
-            self.lens_v[ok] = np.log1p(c[src]) / max(math.log1p(float(c.max())), 1e-9)
-        elif self.color == "age":
-            # by rank among tracked files, newest 1: a linear ramp over time
-            # is nearly flat for an active repo, where most files were
-            # touched in the last few months
-            last = h["file_last"]
-            tracked = last > 0
-            if tracked.any():
-                rank = np.zeros(len(last))
-                order = np.argsort(last[tracked], kind="stable")
-                rank[np.flatnonzero(tracked)[order]] = np.arange(1, tracked.sum() + 1) / tracked.sum()
-                self.lens_v[ok] = rank[src]
-        elif self.color == "changes" and self.compare_i is not None:
-            n_lines = np.diff(self.head[0]["file_line0"])
-            cls, val, rem = atlas_history.changes_between(h, self.rev_i, self.compare_i, n_lines=n_lines)
-            self.lens_c[ok] = cls[src]
-            self.lens_v[ok] = val[src]
-            self.removed = rem
-            self.change_counts = (int((cls[src] == 1).sum()), int((cls[src] == 2).sum()), len(rem))
-
-    def upload_lens(self):
-        """Re-upload the file texture with the lens channels (one small upload)."""
-        self.ff[2::3, 2] = self.lens_v
-        self.ff[2::3, 3] = self.lens_c
-        buf = padded_rows(self.ff, TEX_W)
-        glBindTexture(GL_TEXTURE_2D, self.tex_file_f)
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, buf.shape[1], buf.shape[0], GL_RGBA, GL_FLOAT, buf)
-        self.bind_textures()
-
-    def set_color(self, name):
-        if self.hist is None or name not in LENSES:
-            return
-        self.color = name
-        self.compute_lens()
-        self.upload_lens()
-        self.refresh_panel()
-
-    def set_compare(self, i):
-        """Shift-click on the rail: the second revision of the Changes lens
-        (the same revision again clears it)."""
-        if self.hist is None:
-            return
-        self.compare_i = None if i == self.compare_i else int(i)
-        if self.compare_i is not None and self.color != "changes":
-            self.color = "changes"
-        self.compute_lens()
-        self.upload_lens()
-        self.refresh_panel()
-
-    def lens_code(self):
-        """uLens for the file shader: 0 unless a lens has something to show."""
-        if self.hist is None or self.color == "none":
-            return 0
-        if self.color == "changes" and self.compare_i is None:
-            return 0
-        return LENSES.index(self.color)
-
-    def rev_label(self, i):
-        r = self.hist["json"]["revisions"][i]
-        return f"{r['short']} {rev_date(r['time'])}"
-
-    def lens_status(self):
-        parts = []
-        if self.rev_loading is not None:
-            parts.append(f"indexing {self.hist['json']['revisions'][self.rev_loading]['short']}…")
-        elif self.rev_i != 0:
-            parts.append(f"at {self.rev_label(self.rev_i)}")
-        if self.rev_enriching is not None and self.rev_enriching == self.rev_i:
-            parts.append("resolving…")
-        if self.color == "churn":
-            parts.append("churn · " + (f"last {self.since_days} days" if self.since_days else "all history"))
-        elif self.color == "age":
-            parts.append(f"age · newest {rev_date(int(self.hist['rev_time'][0]))}")
-        elif self.color == "changes":
-            if self.compare_i is None:
-                parts.append("changes · Shift-click the rail to pick a revision")
-            else:
-                a, c, r = self.change_counts
-                old, new = max(self.rev_i, self.compare_i), min(self.rev_i, self.compare_i)
-                parts.append(f"changes · {self.hist['json']['revisions'][old]['short']} → "
-                             f"{'HEAD' if new == 0 else self.hist['json']['revisions'][new]['short']} · "
-                             f"{a} added · {c} changed · {r} removed")
-        return " · ".join(parts)
+        self.tint_on = bool(on)
 
     def status_texts(self):
-        """(the corpus or search line, the lens and revision line or '')."""
+        """(the corpus or search line, the tint's label or '')."""
         status = f"{self.n_files} files · {self.n_lines} lines · {self.n_chars} chars"
         if self.results is not None and len(self.filter_text) >= 2:
             n = len(self.results["order"])
-            n_def = int(self.results["is_def"].sum())
-            status = (f"{n_def} definitions · {n - n_def} references · "
-                      f"{int(self.hits_by_file.sum())} files · {self.result_i + 1}/{n}")
-        extra = ""
-        if self.hist is not None and (self.color != "none" or self.rev_i != 0
-                                      or self.rev_loading is not None or self.rev_enriching is not None):
-            extra = self.lens_status()
+            status = f"{n} hits · {int(self.hits_by_file.sum())} files · {self.result_i + 1}/{n}"
+        extra = self.tint_label if self.tint_on and self.tint_label else ""
         return status, extra
-
-    def rail_rev_at(self, sx):
-        if not len(self.rail_xs):
-            return None
-        return int(np.argmin(np.abs(self.rail_xs - sx)))
-
-    def rail_hover_text(self):
-        r = self.hist["json"]["revisions"][self.rail_hover]
-        return f"{r['short']} {rev_date(r['time'])} · {r['author']} · {r['subject']}"
-
-    def rev_dir(self, i):
-        return Path(self.head_dir) / "rev" / self.hist["json"]["revisions"][i]["short"]
-
-    def load_revision(self, i, sync=False):
-        """Load the corpus at revision i of the table: HEAD's atlas for 0, a
-        cached atlas under rev/<short>/ when it exists, else extract, index
-        and lay out in a thread (or here, when sync) and swap when done."""
-        if self.hist is None or self.rev_loading is not None:
-            return
-        i = int(i)
-        if i == self.rev_i:
-            return
-        if i == 0:
-            self.rev_i = 0
-            self.swap_atlas(*self.head)
-            return
-        d = self.rev_dir(i)
-        if (d / "layout.npz").exists():   # cached: swap now, complete it in the background if needed
-            self.rev_i = i
-            a = load_atlas(d, "tokens")
-            self.swap_atlas(a, load_resolve(d, a))
-            if not (d / "layout_layers.npz").exists() and self.rev_enriching is None:
-                self.rev_enriching = i
-                threading.Thread(target=self.build_revision, args=(i, d, True), daemon=True).start()
-            return
-        self.rev_loading = i
-        if sync:
-            self.build_revision(i, d)
-            self.poll_revision()
-            return
-        threading.Thread(target=self.build_revision, args=(i, d), daemon=True).start()
-
-    def build_revision(self, i, d, enrich_only=False):
-        """Thread body. Stage one: git archive the revision into d/src (kept,
-        so the resolver can read the sources later), index it with --no-git
-        (d is under the ignored data/ directory, where git lists nothing),
-        lay it out with the tokens metric, and hand the atlas over for the
-        swap. Stage two: resolve it and write the other layouts, and hand
-        over again so the metric buttons, the Layers lens and the entity
-        views come alive without moving the camera."""
-        j = self.hist["json"]
-        rev = j["revisions"][i]
-        prefix = j["prefix"]
-        specs = [prefix + s if s != "." else (prefix.rstrip("/") or ".") for s in j["pathspecs"]]
-        src = d / "src"
-        try:
-            if not enrich_only:
-                if not (d / "index.npz").exists() or not src.exists():
-                    shutil.rmtree(src, ignore_errors=True)
-                    src.mkdir(parents=True)
-                    archive = subprocess.Popen(["git", "-C", j["toplevel"], "archive", rev["hash"], "--"] + specs,
-                                               stdout=subprocess.PIPE)
-                    subprocess.run(["tar", "-x", "-C", str(src)], stdin=archive.stdout, check=True)
-                    archive.wait()
-                    if archive.returncode:
-                        raise RuntimeError(f"git archive exited {archive.returncode}")
-                    srcs = [str(src / sp) if sp != "." else str(src) for sp in specs]
-                    subprocess.run([sys.executable, str(HERE / "atlas_index.py"), *srcs, "--out", str(d),
-                                    "--name", self.name, "--no-git"], check=True, capture_output=True, text=True)
-                    for stale in d.glob("layout*.np*"):
-                        stale.unlink()
-                    for stale in d.glob("layout*.json"):
-                        stale.unlink()
-                    for stale in ("resolve.npz", "resolve.json"):
-                        (d / stale).unlink(missing_ok=True)
-                if not (d / "layout.npz").exists():
-                    subprocess.run([sys.executable, str(HERE / "atlas_layout.py"), str(d), "--metric", "tokens",
-                                    "--lens", "folders"], check=True, capture_output=True, text=True)
-                self.rev_q.put(("swap", i, d, None))
-            if not (d / "resolve.npz").exists():
-                subprocess.run([sys.executable, str(HERE / "atlas_resolve.py"), str(d)],
-                               check=True, capture_output=True, text=True)
-            if not (d / "layout_layers.npz").exists():
-                subprocess.run([sys.executable, str(HERE / "atlas_layout.py"), str(d)],
-                               check=True, capture_output=True, text=True)
-            self.rev_q.put(("enrich", i, d, None))
-        except subprocess.CalledProcessError as e:
-            self.rev_q.put(("fail", i, d, (e.stderr or str(e)).strip()[-400:]))
-        except Exception as e:                      # noqa: BLE001
-            self.rev_q.put(("fail", i, d, str(e)))
-
-    def poll_revision(self):
-        while True:
-            try:
-                kind, i, d, err = self.rev_q.get_nowait()
-            except queue.Empty:
-                return
-            if kind == "fail":
-                self.rev_loading = None
-                self.rev_enriching = None
-                print(f"revision {self.hist['json']['revisions'][i]['short']}: {err}", file=sys.stderr)
-            elif kind == "swap":
-                self.rev_loading = None
-                self.rev_enriching = i
-                self.rev_i = i
-                self.swap_atlas(load_atlas(d, "tokens"), None)
-            elif kind == "enrich":
-                self.rev_enriching = None
-                if self.rev_i == i:
-                    self.enrich_atlas(d)
-
-    def enrich_atlas(self, d):
-        """The loaded revision's resolver and other layouts are ready: take
-        them without touching the textures (the active layout's arrays are
-        the same), so the camera, hover and selection stay."""
-        a = self.a
-        a["layouts"] = load_layouts(d)
-        if a["metric"] in a["layouts"]:
-            a.update(a["layouts"][a["metric"]])
-        self.res = load_resolve(d, a)
-        self.metrics = [m for m in METRIC_ORDER if m in a["layouts"]]
-        self.has_layers = "layers" in a["layouts"]
-        self.update_neighbours()
-        self.refresh_panel()
-
-    def history_rows(self):
-        """The Inspector with nothing selected and a history: the loaded and
-        compare revisions, the lens, and the files removed between them."""
-        h, width = self.hist, self.panel_chars()
-        j = h["json"]
-        rows = [(f"History · {len(j['revisions'])} revisions", YELLOW, -1),
-                (f"at {self.rev_label(self.rev_i)}{' HEAD' if self.rev_i == 0 else ''}", UI_TEXT, -1)]
-        if self.compare_i is not None:
-            rows.append((f"vs {self.rev_label(self.compare_i)}", UI_TEXT, -1))
-        rows.append((f"lens {self.color}", UI_TEXT, -1))
-        st = j["stats"]
-        rows.append((f"{st['tracked']} tracked · {st['untracked']} untracked", UI_DIM, -1))
-        if self.color == "changes" and self.compare_i is not None:
-            a, c, r = self.change_counts
-            rows.append(("", UI_DIM, -1))
-            rows.append((f"{a} added · {c} changed", UI_TEXT, -1))
-            rows.append((f"{r} removed", UI_TEXT, -1))
-            if self.removed:
-                rows.append((f"Removed ({len(self.removed)})", YELLOW, -1))
-                for o, ri in self.removed[:100]:
-                    rows.append((self.short_path(j["unindexed"][o], width), UI_DIM, -1))
-                    rows.append((f"      {j['revisions'][ri]['short']} {j['revisions'][ri]['subject']}"[:width], UI_DIM, -1))
-                if len(self.removed) > 100:
-                    rows.append((f"… {len(self.removed) - 100} more", UI_DIM, -1))
-        elif self.color == "changes":
-            rows.append(("Shift-click the rail to", UI_DIM, -1))
-            rows.append(("pick a revision to compare", UI_DIM, -1))
-        rows.append(("", UI_DIM, -1))
-        rows.append(("H: the rail · C: the lens", UI_DIM, -1))
-        rows.append(("click a file for its history", UI_DIM, -1))
-        return rows
-
-    def file_history_rows(self):
-        """Per selected file (the first three): commits, dates, lines added
-        and removed, and the newest five commits touching it."""
-        h = self.hist
-        if h is None:
-            return []
-        j, width = h["json"], self.panel_chars()
-        hi = self.head_index()
-        rows = []
-        for f in np.flatnonzero(self.sel)[:3]:
-            g = int(hi[f])
-            rows.append((f"History · {self.short_path(self.paths[f], width - 10)}", YELLOW, -1))
-            if g < 0 or h["file_commits"][g] == 0:
-                rows.append(("not in HEAD's history" if g < 0 else "untracked", UI_DIM, -1))
-                continue
-            rows.append((f"{int(h['file_commits'][g])} commits · +{int(h['file_added'][g])} -{int(h['file_removed'][g])}", UI_TEXT, -1))
-            rows.append((f"{rev_date(int(h['file_first'][g]))} to {rev_date(int(h['file_last'][g]))}"[:width], UI_DIM, -1))
-            entries = np.flatnonzero(h["rev_file"] == g)
-            revs = np.searchsorted(h["rev_ptr"], entries, side="right") - 1
-            for e, ri in list(zip(entries, revs))[:5]:
-                r = j["revisions"][int(ri)]
-                rows.append((f"{r['short']} {rev_date(r['time'])} +{int(h['rev_added'][e])} -{int(h['rev_removed'][e])}"[:width], UI_DIM, -1))
-                rows.append((f"   {r['subject']}"[:width], UI_DIM, -1))
-        if self.rev_i != 0:
-            rows.append(("(HEAD's history; the map is", UI_DIM, -1))
-            rows.append((f" at {self.rev_label(self.rev_i)})", UI_DIM, -1))
-        return rows
 
     # ---- window ---------------------------------------------------------
     def open_window(self):
@@ -874,7 +420,7 @@ class Viewer:
         glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
         glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
         glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, glfw.TRUE)
-        self.win = glfw.create_window(1600, 1000, f"code atlas: {self.name}", None, None)
+        self.win = glfw.create_window(1600, 1000, f"big-text: {self.name}", None, None)
         if not self.win:
             raise RuntimeError("window creation failed")
         glfw.make_context_current(self.win)
@@ -902,16 +448,13 @@ class Viewer:
         self.fb_w, self.fb_h = glfw.get_framebuffer_size(self.win)
         ww, wh = glfw.get_window_size(self.win)
         self.px = self.fb_w / ww if ww else 1.0      # device pixels per point
-        # the map's viewport is the window minus a top strip (the toolbar
-        # row, with the filter box while the panel is closed), a bottom strip
-        # (the crumb trail row, with the status while the panel is closed,
-        # plus the revision rail when shown) and the right column (map_w)
+        # the map's viewport is the window minus a top strip (the filter
+        # box), a bottom strip (the crumb trail and the status) and the right
+        # column while the panel is open (map_w)
         s = self.px
         m, row = MARGIN_PT * s, 13 * s + 2 * 5 * s * 0.6      # a boxed row of 13 pt text
         self.top_h = m + row + m
         self.bottom_h = m + row + m
-        if self.rail_show and self.hist is not None:
-            self.bottom_h += RAIL_PT * s + m
         self.map_y0 = self.top_h
         self.map_h = max(1.0, self.fb_h - self.top_h - self.bottom_h)
 
@@ -989,52 +532,13 @@ class Viewer:
                 glUniform1f(loc, VT_MIN_PPL)
         self.bind_textures()
 
-    @property
-    def lens(self):
-        return "layers" if self.a["layout"].get("lens") == "layers" else "folders"
-
-    def refresh_dirs(self):
-        """Directory labels, parents and children of the active layout (the
-        Layers lens has its own pseudo-tree of rank rows and cycles)."""
-        a = self.a
-        jd = a["layout"]["dirs"]
-        self.dir_labels = [d["label"] for d in jd]
-        if jd and "parent" in jd[0]:
-            self.dir_parent = np.array([d["parent"] for d in jd], np.int64)
-            self.dir_children = [d["children"] for d in jd]
-        else:
-            self.dir_parent = np.array([d["parent"] for d in a["index"]["dirs"]], np.int64)
-            self.dir_children = [d["children"] for d in a["index"]["dirs"]]
-
-    def compute_heights(self):
-        """z base and height per file and directory from the current layout's
-        metric: directories are terraces of DIR_STEP per level, files sit on
-        their directory's terrace with a height of H_MAX * sqrt(metric /
-        max). A book has no heights at all: its 3D view is the flat sheet
-        tilted, no page or part extruded."""
-        a = self.a
-        depth = a["dir_depth"].astype(np.float64)
-        flat = a["index"].get("corpus") == "book"     # a book is one flat sheet: nothing rises
-        self.dir_z0 = np.maximum(depth - 1, 0) * (0.0 if flat else DIR_STEP)
-        self.dir_h = np.where(depth >= 1, 0.0 if flat else DIR_STEP, 0.0)
-        top = self.dir_z0 + self.dir_h
-        m = a.get("file_metric")
-        if m is None:
-            m = np.ones(self.n_files)
-        m = np.asarray(m, np.float64)
-        self.file_h = H_MAX * np.sqrt(np.maximum(m, 0) / max(float(m.max()), 1e-9))
-        if flat:
-            self.file_h[:] = 0.0
-        self.file_z0 = top[a["file_dir"]]
-        self.file_top = self.file_z0 + self.file_h
-
     def z_scale(self):
         return 1.0 if self.proj == "3d" else 0.0
 
     def upload_layout(self):
         """(Re)upload the layout textures: one texel per visual row (position,
-        row index in file; byte offset, file, indent | len), two per file and
-        two per directory. Returns the bytes uploaded."""
+        row index in file; byte offset, file, indent | len), three per file
+        and three per directory. Returns the bytes uploaded."""
         a = self.a
         for t in (self.tex_line_f, self.tex_line_u, self.tex_file_f, self.tex_dir_f):
             if t is not None:
@@ -1068,8 +572,8 @@ class Viewer:
         ff[1::3, 3] = a["file_hue"]
         ff[2::3, 0] = self.file_z0
         ff[2::3, 1] = self.file_h
-        ff[2::3, 2] = self.lens_v
-        ff[2::3, 3] = self.lens_c
+        if self.tint is not None:
+            ff[2::3, 2] = self.tint
         self.ff = ff
         buf = padded_rows(ff, TEX_W)
         self.tex_file_f = texture_2d(GL_RGBA32F, GL_RGBA, GL_FLOAT, buf)
@@ -1091,49 +595,13 @@ class Viewer:
     def bind_textures(self):
         """Bind every texture to its unit, the vector tier's two included.
         Called after anything created or re-uploaded a texture: texture
-        creation and glTexSubImage2D bind on whatever unit is active, which
-        after setup is the last one, the band texture's, so a lens upload
-        once replaced the bands with the file texture and the glyphs went
-        blank."""
+        creation and glTexSubImage2D bind on whatever unit is active."""
         textures = [self.tex_chars, self.tex_kinds, self.tex_glyphs, self.tex_line_f,
                     self.tex_line_u, self.tex_file_f, self.tex_file_u, self.tex_dir_f] + list(self.vt_textures)
         for i, tex in enumerate(textures):
             glActiveTexture(GL_TEXTURE0 + i)
             glBindTexture(GL_TEXTURE_2D, tex)
-        glActiveTexture(GL_TEXTURE0 + 5)          # uFileF: the unit a lens upload re-binds on
-
-    def set_metric(self, metric):
-        self.set_layout(metric)
-
-    def set_lens(self, lens):
-        self.set_layout("layers" if lens == "layers" else self.folders_metric)
-
-    def set_layout(self, key):
-        """Switch to another layout (a metric of the Folders lens, or the
-        Layers lens): a hard cut, as in the video. The world is the same
-        size, so the camera stays where it is."""
-        a = self.a
-        if key not in a["layouts"] or key == a["metric"]:
-            return
-        a.update(a["layouts"][key])
-        a["metric"] = key
-        if key != "layers":
-            self.folders_metric = key
-        self.n_dirs = len(a["dir_rect"])
-        self.dir_scale = np.ones(self.n_dirs)
-        self.refresh_dirs()
-        self.n_rows = len(a["row_pos"])
-        self.item_rect_file = a["item_file"][a["item_rect_item"]]
-        self.build_hover_grid()
-        self.build_dir_tags()
-        order = np.argsort(a["file_pitch"], kind="stable")
-        per_file = np.diff(a["file_line0"])[order]
-        mid = min(int(np.searchsorted(np.cumsum(per_file), per_file.sum() / 2)), len(order) - 1)
-        self.median_pitch = float(a["file_pitch"][order[mid]])
-        self.compute_heights()
-        self.upload_layout()
-        self.bind_textures()
-        self.hover = None
+        glActiveTexture(GL_TEXTURE0 + 5)
 
     def set_proj(self, proj):
         if proj == self.proj:
@@ -1163,7 +631,7 @@ class Viewer:
         return d[name]
 
     def camera_matrix(self):
-        """World (x, y, z) to clip. 2D: orthographic, exactly the old
+        """World (x, y, z) to clip. 2D: orthographic, exactly the
         (world - offset) * scale mapping. 3D: a perspective camera at
         distance D from the focus (cx, cy, 0), tilted from top-down by
         self.tilt and turned by self.yaw, with D chosen so that one world
@@ -1310,7 +778,6 @@ class Viewer:
             for _ in range(12):
                 self.camera_matrix()
                 c = np.concatenate((corners, np.zeros((4, 1)), np.ones((4, 1))), axis=1) @ self.M.T
-                top = c.copy(); top[:, 2] += H_MAX
                 w = np.maximum(c[:, 3], 1e-6)
                 over = float(max(np.abs(c[:, 0] / w).max(), np.abs(c[:, 1] / w).max()))
                 if over <= 0.97:
@@ -1433,6 +900,10 @@ class Viewer:
         self.zoom = self.clamp_zoom(self.map_w / w, f["pitch"])
 
     # ---- input ----------------------------------------------------------
+    def over_ui(self, sx, sy):
+        return not self.in_map(sx, sy) or any(
+            rc and in_rect(sx, sy, rc) for rc in (self.panel_rect, self.filter_rect))
+
     def on_mouse_button(self, win, button, action, mods):
         if self.scripted:             # real input must not disturb a scripted run
             return
@@ -1442,90 +913,31 @@ class Viewer:
             self.fly = None
             self.zoom_vel = 0.0
             self.tilting = bool(mods & glfw.MOD_ALT)
-            over_ui = not self.in_map(sx, sy) or any(
-                rc and in_rect(sx, sy, rc) for rc in [self.panel_rect, self.filter_rect, self.rail_rect]
-                + [r for r, _ in self.toolbar])
-            if (mods & glfw.MOD_SHIFT) and button == glfw.MOUSE_BUTTON_LEFT and not over_ui:
-                self.marquee = [sx, sy, sx, sy]       # Shift-drag selects a rectangle
-                self.drag = None
-            else:
-                self.drag = (x, y)
+            self.drag = (x, y)
             self.press = (x, y)
         else:
             moved = self.press is not None and (abs(x - self.press[0]) >= 3 or abs(y - self.press[1]) >= 3)
-            if self.marquee is not None:
-                if moved:
-                    self.select_marquee(self.marquee, toggle=False)
-                else:
-                    self.click(sx, sy, toggle=True)   # Shift-click toggles one file
-                self.marquee = None
-            elif not moved and button == glfw.MOUSE_BUTTON_LEFT:
-                self.click(sx, sy, toggle=bool(mods & glfw.MOD_SHIFT))   # Shift over the rail: compare
+            if not moved and button == glfw.MOUSE_BUTTON_LEFT:
+                self.click(sx, sy)
             self.drag = None
             self.press = None
 
-    def click(self, sx, sy, toggle=False):
-        if self.rail_rect and in_rect(sx, sy, self.rail_rect):
-            i = self.rail_rev_at(sx)
-            if i is not None:
-                if toggle:
-                    self.set_compare(i)          # Shift-click: the compare revision
-                else:
-                    self.load_revision(i)
-            return
-        for rect, act in self.toolbar:
-            if in_rect(sx, sy, rect):
-                if act[0] == "metric":
-                    self.set_metric(act[1])
-                elif act[0] == "proj":
-                    self.set_proj(act[1])
-                elif act[0] == "lens":
-                    self.set_lens(act[1])
-                elif act[0] == "color":
-                    self.set_color(act[1])
-                elif act[0] == "history":
-                    self.rail_show = not self.rail_show
-                return
+    def click(self, sx, sy):
         if self.filter_rect and in_rect(sx, sy, self.filter_rect):
             self.filter_focus = True
             return
         if self.panel_rect and in_rect(sx, sy, self.panel_rect):
             row = self.panel_row_at(sy)
-            if row is not None:
-                act = self.panel_rows[row][2]
-                if isinstance(act, tuple):
-                    if act[0] == "tab":
-                        self.toggle_inspector()
-                    elif act[0] == "goto":
-                        self.fly_to(self.line_rect(act[1], act[2], act[3]))
-                elif act >= 0:
-                    self.goto_result(act)
+            if row is not None and self.panel_rows[row][2] >= 0:
+                self.goto_result(self.panel_rows[row][2])
             return
         self.filter_focus = False
-        if self.hover is None:
-            if not toggle:
-                self.clear_selection()
-            return
-        f, j, col = self.hover
-        # Shift-click toggles the file; a click on an identifier at text zoom
-        # selects it in the Inspector; any other click selects the file
-        if toggle:
-            self.select_files([f], toggle=True)
-            return
-        if self.res is not None and self.rung[f] == 3 and j >= 0:
-            sym = symbol_at(self.res, f, j, col)
-            if sym is not None and self.select_symbol(sym):
-                return
-        self.select_files([f])
 
     def on_cursor(self, win, x, y):
         if self.scripted:             # real input must not disturb a scripted run
             return
         self.cursor_pt = (x, y)
         self.cursor = (x * self.px, y * self.px)
-        if self.marquee is not None:
-            self.marquee[2], self.marquee[3] = x * self.px, y * self.px
-            return
         if self.drag:
             dx, dy = (x - self.drag[0]) * self.px, (y - self.drag[1]) * self.px
             if self.tilting:              # Alt-drag: tilt and turn the 3D camera
@@ -1576,9 +988,6 @@ class Viewer:
             elif self.result_i >= 0:
                 self.result_i = -1
                 self.update_file_flags()
-            elif self.sel.any() or self.selected is not None:
-                self.selected = None
-                self.clear_selection()
             return
         if key in (glfw.KEY_ENTER, glfw.KEY_KP_ENTER, glfw.KEY_DOWN):
             self.step(1)
@@ -1592,29 +1001,12 @@ class Viewer:
             self.step(1)
         elif key == glfw.KEY_LEFT_BRACKET:
             self.step(-1)
-        elif key == glfw.KEY_C and self.hist is not None:
-            self.set_color(LENSES[(LENSES.index(self.color) + 1) % len(LENSES)])
-        elif key == glfw.KEY_H and self.hist is not None:
-            self.rail_show = not self.rail_show
-        elif key in (glfw.KEY_LEFT, glfw.KEY_RIGHT) and self.rail_show and self.hist is not None:
-            d = 1 if key == glfw.KEY_LEFT else -1           # left is older, a larger index
-            n = len(self.hist["rev_time"])
-            if mods & glfw.MOD_SHIFT:
-                base = self.compare_i if self.compare_i is not None else self.rev_i
-                self.set_compare(int(np.clip(base + d, 0, n - 1)))
-            else:
-                self.load_revision(int(np.clip(self.rev_i + d, 0, n - 1)))
+        elif key == glfw.KEY_C:
+            self.set_tint(not self.tint_on)
         elif key == glfw.KEY_R:
             self.fit()
         elif key == glfw.KEY_3:
             self.set_proj("2d" if self.proj == "3d" else "3d")
-        elif key == glfw.KEY_M and len(self.metrics) > 1:
-            i = self.metrics.index(self.a["metric"])
-            self.set_metric(self.metrics[(i + 1) % len(self.metrics)])
-        elif key == glfw.KEY_I and (self.res is not None or self.hist is not None):
-            self.toggle_inspector()
-        elif key == glfw.KEY_TAB and (self.res is not None or self.hist is not None):
-            self.toggle_inspector()
         elif key == glfw.KEY_SLASH:
             self.filter_focus = True
             self.swallow_char = True
@@ -1638,11 +1030,6 @@ class Viewer:
         if len(text) < 2:
             self.set_results(None)
             return
-        if self.res is not None:
-            r = symbol_search(self.a, self.res, text)
-            if r is not None:
-                self.set_results(r)
-                return
         if sync:
             self.set_results(run_search(self.a, text))
             return
@@ -1664,15 +1051,13 @@ class Viewer:
         self.panel_scroll = 0
         self.hits_by_file[:] = False
         self.hit_count[:] = 0
-        self.result_rows = []
+        self.panel_rows = []
         if res is None or len(res["file"]) == 0:
             self.results = None if res is None else dict(res, order=np.zeros(0, np.int64))
             if self.results is not None:
-                self.result_rows = [("no hits", UI_DIM, -1)]
-            self.refresh_panel()
+                self.panel_rows = [("no hits", UI_DIM, -1)]
         else:
-            # definitions first, then references, each by file then line
-            key = np.lexsort((res["line"], res["file"], ~res["is_def"]))
+            key = np.lexsort((res["line"], res["file"]))     # by file, then line
             res = dict(res, order=key)
             self.results = res
             np.add.at(self.hit_count, res["file"], 1)
@@ -1683,11 +1068,10 @@ class Viewer:
             self.fit()
 
     def result(self, i):
-        """(file, global line, col, len, is_def, kind) of result i in panel order."""
+        """(file, global line, col, len) of hit i in panel order."""
         r = self.results
         k = r["order"][i]
-        return (int(r["file"][k]), int(r["line"][k]), int(r["col"][k]), r["len"],
-                bool(r["is_def"][k]), r["kind"][k])
+        return int(r["file"][k]), int(r["line"][k]), int(r["col"][k]), r["len"]
 
     def line_text(self, line):
         lo = self.a["line_off"]
@@ -1698,229 +1082,30 @@ class Viewer:
         return int((180 - 10) / (11 * self.ui_aspect))
 
     def build_panel_rows(self):
+        """The panel: the hits by file, each with its line number and the
+        line's text windowed so the hit shows. A row's third element is the
+        hit's index, or -1."""
         r = self.results
         width = self.panel_chars()
         n = len(r["order"])
-        n_def = int(r["is_def"].sum())
-        rows = []
-        for title, lo, hi in (("Definitions", 0, n_def), ("References", n_def, n)):
-            if hi <= lo:
-                continue
-            rows.append((f"{title} ({hi - lo})", YELLOW, -1))
-            last_file = -1
-            for i in range(lo, hi):
-                f, line, col, ln, is_def, kind = self.result(i)
-                if f != last_file:
-                    path = self.paths[f]
-                    if len(path) > width:            # keep the file name, lose the head
-                        path = "…" + path[len(path) - width + 1:]
-                    rows.append((path, UI_TEXT, -1))
-                    last_file = f
-                j = line - int(self.a["file_line0"][f]) + 1
-                raw = self.line_text(line)
-                body = raw.lstrip()
-                c = col - (len(raw) - len(body))     # hit column in the stripped text
-                room = width - 6 - (len(kind) + 1 if kind else 0)
-                if c + ln > room:                    # window the text so the hit shows
-                    start = max(0, c - 8)
-                    body = "…" + body[start:]
-                text = f"{j:>5} {body}"
-                if kind:                     # kind (or status) tag at the right edge
-                    room = width - len(kind) - 1
-                    text = text[:room - 1] + "…" if len(text) > room else text.ljust(room)
-                    text += " " + kind
-                rows.append((text, UI_TEXT if is_def else UI_DIM, i))
-        self.result_rows = rows
-        self.refresh_panel()
-
-    # ---- inspector ---------------------------------------------------------
-    def refresh_panel(self):
-        """The right column shows the Results rows or the Inspector rows,
-        with a tab line on top when both exist. A row's third element is
-        a result index, -1 for none, or an action tuple."""
-        have_results = bool(self.result_rows)
-        have_inspector = self.res is not None or self.hist is not None
-        rows = []
-        if self.inspector_open and have_inspector:
-            if have_results:
-                rows.append(("[Inspector]  Results", YELLOW, ("tab",)))
-            rows += self.inspector_rows()
-        elif have_results:
-            if have_inspector:
-                rows.append((" Inspector  [Results]", YELLOW, ("tab",)))
-            rows += self.result_rows
+        rows = [(f"Hits ({n})", YELLOW, -1)]
+        last_file = -1
+        for i in range(n):
+            f, line, col, ln = self.result(i)
+            if f != last_file:
+                rows.append((self.short_path(self.paths[f], width), UI_TEXT, -1))
+                last_file = f
+            j = line - int(self.a["file_line0"][f]) + 1
+            raw = self.line_text(line)
+            body = raw.lstrip()
+            c = col - (len(raw) - len(body))     # hit column in the stripped text
+            if c + ln > width - 6:               # window the text so the hit shows
+                body = "…" + body[max(0, c - 8):]
+            rows.append((f"{j:>5} {body}", UI_DIM, i))
         self.panel_rows = rows
-
-    def inspector_rows(self):
-        res, width = self.res, self.panel_chars()
-        e = self.selected
-        if e is None and self.sel.any():
-            return self.selection_rows()
-        if e is None and self.hist is not None and (res is None or self.color == "changes"):
-            return self.history_rows()
-        if e is None:
-            st = res["stats"]
-            rows = [(f"Coverage · {st['crates']} crates", YELLOW, -1),
-                    (f"{'known':<18}{st['resolved']:>8}", UI_TEXT, -1),
-                    (f"{'entities':<18}{st['entities']:>8}", UI_TEXT, -1),
-                    (f"{'references':<18}{st['references']:>8}", UI_TEXT, -1)]
-            for name in res["statuses"]:
-                c = st["status"].get(name, 0)
-                if c:
-                    rows.append((f"  {name:<16}{c:>8}", UI_DIM, -1))
-            rows.append((f"{'files parsed':<18}{st['files']:>8}", UI_DIM, -1))
-            rows.append((f"{'unattached':<18}{st['unattached']:>8}", UI_DIM, -1))
-            rows.append((f"resolved in {st['seconds']} s", UI_DIM, -1))
-            rows.append(("", UI_DIM, -1))
-            rows.append(("click a symbol at text zoom to inspect it", UI_DIM, -1))
-            return rows
-        name = res["names"][res["ent_name"][e]]
-        kind = res["kinds"][res["ent_kind"][e]]
-        f, ln = int(res["ent_file"][e]), int(res["ent_line"][e])
-        rows = [(f"{kind} {name}", YELLOW, -1),
-                (self.short_path(self.paths[f], width - 6) + f":{ln + 1}", UI_TEXT, ("goto", f, int(res["ent_gline"][e]), int(res["ent_col"][e])))]
-        sc = int(res["ent_scope"][e])
-        if sc >= 0:
-            rows.append((f"in {res['kinds'][res['ent_kind'][sc]]} {res['names'][res['ent_name'][sc]]}", UI_DIM, -1))
-        d = int(res["defs_by_name"][res["ent_name"][e]])
-        refs = np.flatnonzero(res["ref_ent"] == e)
-        rows.append((f"{d} definition{'s' if d != 1 else ''} · {len(refs)} reference{'s' if len(refs) != 1 else ''}", UI_TEXT, -1))
-        if len(refs):
-            rows.append((f"References ({len(refs)})", YELLOW, -1))
-            order = np.lexsort((res["ref_line"][refs], res["ref_file"][refs]))
-            last = -1
-            for k in order[:400]:
-                r = refs[k]
-                rf, rl = int(res["ref_file"][r]), int(res["ref_gline"][r])
-                if rf != last:
-                    rows.append((self.short_path(self.paths[rf], width), UI_TEXT, -1))
-                    last = rf
-                body = self.line_text(rl).strip()
-                rows.append((f"{rl - int(self.a['file_line0'][rf]) + 1:>5} {body}", UI_DIM, ("goto", rf, rl, int(res["ref_col"][r]))))
-            if len(refs) > 400:
-                rows.append((f"… {len(refs) - 400} more", UI_DIM, -1))
-        return rows
 
     def short_path(self, path, width):
         return path if len(path) <= width else "…" + path[len(path) - width + 1:]
-
-    def select_files(self, files, toggle=False):
-        """Select files (replacing, or toggling with Shift) and light their
-        neighbourhood: the files they reference and the files that
-        reference them. The Inspector follows."""
-        files = np.asarray(files, np.int64)
-        if toggle:
-            self.sel[files] = ~self.sel[files]
-        else:
-            self.sel[:] = False
-            self.sel[files] = True
-        self.update_neighbours()
-        if self.sel.any():
-            self.selected = None
-            fitted = self.is_fitted()
-            self.inspector_open = True
-            self.panel_scroll = 0
-            self.refresh_panel()
-            if fitted:
-                self.fit()
-
-    def update_neighbours(self):
-        self.nb[:] = False
-        if self.res is None or not self.sel.any():
-            return
-        for f in np.flatnonzero(self.sel):
-            self.nb[self.res["out_idx"][self.res["out_ptr"][f]:self.res["out_ptr"][f + 1]]] = True
-            self.nb[self.res["in_idx"][self.res["in_ptr"][f]:self.res["in_ptr"][f + 1]]] = True
-        self.nb &= ~self.sel
-
-    def clear_selection(self):
-        self.sel[:] = False
-        self.nb[:] = False
-        self.refresh_panel()
-
-    def file_screen_rects(self):
-        """Device-pixel bounding boxes of every file (for the marquee)."""
-        r = self.a["file_rect"]
-        if self.proj != "3d":
-            x0, y0, _, _ = self.view()
-            return (r - [x0, y0, x0, y0]) * self.zoom
-        n = len(r)
-        c = np.empty((n, 4, 4))
-        c[:, 0, :2] = r[:, [0, 1]]; c[:, 1, :2] = r[:, [2, 1]]
-        c[:, 2, :2] = r[:, [0, 3]]; c[:, 3, :2] = r[:, [2, 3]]
-        c[:, :, 2] = self.file_top[:, None]
-        c[:, :, 3] = 1.0
-        clip = c @ self.M.T
-        w = np.where(clip[:, :, 3] > 1e-6, clip[:, :, 3], np.nan)
-        sx = (clip[:, :, 0] / w + 1) * 0.5 * self.map_w
-        sy = (1 - clip[:, :, 1] / w) * 0.5 * self.map_h + self.map_y0
-        with np.errstate(invalid="ignore"):
-            out = np.stack([np.nanmin(sx, 1), np.nanmin(sy, 1), np.nanmax(sx, 1), np.nanmax(sy, 1)], 1)
-        out[np.isnan(out).any(axis=1)] = -1e9
-        return out
-
-    def select_marquee(self, m, toggle):
-        x0, x1 = sorted((m[0], m[2]))
-        y0, y1 = sorted((m[1], m[3]))
-        sr = self.file_screen_rects()
-        hit = (sr[:, 2] > x0) & (sr[:, 0] < x1) & (sr[:, 3] > y0) & (sr[:, 1] < y1) & self.visible
-        if hit.any():
-            self.select_files(np.flatnonzero(hit), toggle=toggle)
-
-    def selection_rows(self):
-        res, width = self.res, self.panel_chars()
-        files = np.flatnonzero(self.sel)
-        rows = [(f"Selection · {len(files)} file{'s' if len(files) != 1 else ''}", YELLOW, -1)]
-        for f in files[:60]:
-            o = int(res["out_ptr"][f + 1] - res["out_ptr"][f]) if res is not None else 0
-            i = int(res["in_ptr"][f + 1] - res["in_ptr"][f]) if res is not None else 0
-            rows.append((self.short_path(self.paths[f], width - 12).ljust(width - 12) + f"{o:>4}→ {i:>4}←", UI_TEXT,
-                         ("goto", int(f), int(self.a["file_line0"][f]), 0)))
-        if len(files) > 60:
-            rows.append((f"… {len(files) - 60} more", UI_DIM, -1))
-        rows += self.file_history_rows()          # git history of the first few, before the graph
-        if res is not None:
-            uses = np.zeros(self.n_files, bool)
-            used = np.zeros(self.n_files, bool)
-            for f in files:
-                uses[res["out_idx"][res["out_ptr"][f]:res["out_ptr"][f + 1]]] = True
-                used[res["in_idx"][res["in_ptr"][f]:res["in_ptr"][f + 1]]] = True
-            uses &= ~self.sel
-            used &= ~self.sel
-            for title, mask in (("Uses", uses), ("Used by", used)):
-                idx = np.flatnonzero(mask)
-                rows.append((f"{title} ({len(idx)} files)", YELLOW, -1))
-                for g in idx[:40]:
-                    rows.append((self.short_path(self.paths[g], width), UI_DIM,
-                                 ("goto", int(g), int(self.a["file_line0"][g]), 0)))
-                if len(idx) > 40:
-                    rows.append((f"… {len(idx) - 40} more", UI_DIM, -1))
-        return rows
-
-    def select_symbol(self, sym):
-        """Select the entity of a symbol (a reference selects its target)."""
-        kind, i = sym
-        e = i if kind == "ent" else int(self.res["ref_ent"][i])
-        if e < 0:
-            return False
-        fitted = self.is_fitted()
-        self.selected = e
-        self.sel[:] = False
-        self.nb[:] = False
-        self.inspector_open = True
-        self.panel_scroll = 0
-        self.refresh_panel()
-        if fitted:
-            self.fit()
-        return True
-
-    def toggle_inspector(self, open_=None):
-        fitted = self.is_fitted()
-        self.inspector_open = (not self.inspector_open) if open_ is None else open_
-        self.panel_scroll = 0
-        self.refresh_panel()
-        if fitted:
-            self.fit()
 
     def update_file_flags(self):
         self.dimmed = np.zeros(self.n_files, bool)
@@ -1939,7 +1124,7 @@ class Viewer:
     def goto_result(self, i, complete=False):
         self.result_i = i
         self.update_file_flags()
-        f, line, col, ln, _, _ = self.result(i)
+        f, line, col, ln = self.result(i)
         self.fly_to(self.line_rect(f, line, col + ln / 2), complete=complete)
         # keep the current row in view
         for k, row in enumerate(self.panel_rows):
@@ -1974,8 +1159,6 @@ class Viewer:
         if not matches:
             raise SystemExit(f"error: --goto: no file matches '{path}'")
         f = min(matches, key=lambda i: len(self.paths[i]))
-        if line and not line.isdigit():
-            raise SystemExit("error: --goto: line must be an integer")
         l0, l1 = (int(v) for v in self.a["file_line0"][f:f + 2])
         if line:
             j = min(max(int(line) - 1, 0), max(l1 - l0 - 1, 0))
@@ -2079,35 +1262,16 @@ class Viewer:
             it = self.enclosing_item(f, j)
             if it is not None:
                 text += f" {self.item_keyword(it, f)} {self.item_names[it]}"
-        if self.rung[f] == 3 and self.res is not None and j >= 0:
-            sym = symbol_at(self.res, f, j, col)
-            if sym is not None:
-                text = f"{self.paths[f]}:{j + 1} " + self.symbol_text(sym)
-                return text
         if self.rung[f] == 3 and self.results is not None:
             text += f" · {int(self.hit_count[f])} hits"
         return text
-
-    def symbol_text(self, sym):
-        """'struct Window · 1 definition · 129 references', or the status of
-        an unresolved reference."""
-        res = self.res
-        kind, i = sym
-        e = i if kind == "ent" else int(res["ref_ent"][i])
-        if e < 0:
-            return f"{res['names'][res['ref_name'][i]]} · {res['statuses'][res['ref_status'][i]]}"
-        d = int(res["defs_by_name"][res["ent_name"][e]])
-        r = int(res["ent_refs"][e])
-        return (f"{res['kinds'][res['ent_kind'][e]]} {res['names'][res['ent_name'][e]]} · "
-                f"{d} definition{'s' if d != 1 else ''} · {r} reference{'s' if r != 1 else ''}")
 
     def build_dir_tags(self):
         """The tag each directory draws, or None. A directory whose inner
         rectangle is filled by exactly one child directory (at least 85
         percent of it) draws no tag; the innermost directory of such a
         chain draws one tag joining the chain's names ('platform · src ·
-        os'), as the video collapses 'git · tests'. The crumb trail still
-        uses the plain labels."""
+        os'). The crumb trail still uses the plain labels."""
         a = self.a
         r, pad = a["dir_rect"], a["dir_pad"]
         area = (r[:, 2] - r[:, 0]) * (r[:, 3] - r[:, 1])
@@ -2199,11 +1363,8 @@ class Viewer:
         self.rung = ((ppl >= 1).astype(np.uint8) + (ppl >= 3) + (ppl >= 6)).astype(np.uint8)
         flags = np.zeros(self.n_files, np.uint8)
         cur = self.cursor_override if self.scripted else self.cursor
-        over_ui = cur is not None and any(rc and in_rect(cur[0], cur[1], rc)
-                                          for rc in [self.panel_rect, self.filter_rect, self.rail_rect]
-                                          + [r for r, _ in self.toolbar])
         self.hover = (self.hover_at(*cur) if cur is not None and self.drag is None
-                      and not over_ui else None)
+                      and not self.over_ui(*cur) else None)
         if self.hover is not None:
             flags[self.hover[0]] |= 1
         if self.results is not None and len(self.filter_text) >= 2:
@@ -2211,11 +1372,6 @@ class Viewer:
             if self.current_file >= 0:
                 flags[self.current_file] |= 4
             flags[self.dimmed] |= 8
-        if self.sel.any():                # the selection and its neighbourhood lit, the rest dimmed
-            flags[self.sel] |= 16
-            flags[self.nb] |= 32
-            if self.results is None or len(self.filter_text) < 2:
-                flags[~(self.sel | self.nb)] |= 8
         # rung 0 draws every step-th line so the density stays about one
         # bar per pixel row; the step goes to the shader as two bytes
         self.file_step = np.ones(self.n_files, np.int64)
@@ -2382,7 +1538,7 @@ class Viewer:
         s = self.px
         boxes, texts = [], []
         size, small = 13 * s, 11 * s
-        cw, cws = size * self.ui_aspect, small * self.ui_aspect
+        cw = size * self.ui_aspect
         m, pad = MARGIN_PT * s, 5 * s
         a = self.a
 
@@ -2447,38 +1603,9 @@ class Viewer:
         flush()                            # and go under the panels
         glDisable(GL_SCISSOR_TEST)
 
-        # toolbar, top left: lens, projection, metric (text buttons; the
-        # active one in yellow; 3D arrives with phase 3)
-        self.toolbar = []
-        tx, ty = m, m
-        th = size + 2 * pad * 0.6
-        lens = self.lens
-        groups = [[("Folders", ("lens", "folders"), lens == "folders")]
-                  + ([("Layers", ("lens", "layers"), lens == "layers")] if self.has_layers else []),
-                  [("2D", ("proj", "2d"), self.proj != "3d"), ("3D", ("proj", "3d"), self.proj == "3d")],
-                  [(mt.capitalize(), ("metric", mt), mt == self.a["metric"]) for mt in self.metrics]]
-        if self.hist is not None:
-            groups.append([(name.capitalize(), ("color", name), self.color == name) for name in LENSES])
-            groups.append([("History", ("history",), self.rail_show)])
-        for gi, group in enumerate(groups):
-            if gi:
-                tx += m
-            for text, act, active in group:
-                bw = len(text) * cw + 2 * pad
-                box(tx, ty, tx + bw, ty + th, UI_BOX, 0.85)
-                label(tx + pad, ty + pad * 0.6, text, color=YELLOW if active else UI_TEXT)
-                self.toolbar.append(((tx, ty, tx + bw, ty + th), act))
-                tx += bw + 2 * s
-
-        if self.marquee is not None:
-            x0, x1 = sorted((self.marquee[0], self.marquee[2]))
-            y0, y1 = sorted((self.marquee[1], self.marquee[3]))
-            box(x0, y0, x1, y1, YELLOW, 0.12)
-            box(x0, y0, x1, y1, YELLOW, 1.0, border=1.5 * s)
-
         # the bottom strip: the crumb trail left and, while the panel is
-        # closed, the status right-aligned on the same row (the lens and
-        # revision in yellow before it), each cut to the room left
+        # closed, the status right-aligned on the same row (the tint's label
+        # in yellow before it), each cut to the room left
         row_y = self.fb_h - m - size - 2 * pad * 0.6
         bw = len(self.crumb) * cw + 2 * pad
         box(m, row_y, m + bw, self.fb_h - m, UI_BOX, 0.85)
@@ -2497,70 +1624,10 @@ class Viewer:
                 x1 -= tw + 2 * s
                 free -= tw + 2 * s
 
-        # the revision rail above the crumb trail: time left to right, one
-        # tick per commit, the loaded revision in yellow, the compare
-        # revision in teal, year labels where there is room
-        self.rail_rect = None
-        self.rail_hover = None
-        cur = self.cursor_override if self.scripted else self.cursor
-        if self.rail_show and self.hist is not None and len(self.hist["rev_time"]):
-            rh = 22 * s
-            rx0, rx1 = m, self.map_w - m
-            ry1 = self.fb_h - m - (size + 2 * pad * 0.6) - m
-            ry0 = ry1 - rh
-            self.rail_rect = (rx0, ry0, rx1, ry1)
-            box(rx0, ry0, rx1, ry1, UI_BOX, 0.85)
-            t = self.hist["rev_time"]
-            t0, t1 = int(t[-1]), int(t[0])
-            span = max(t1 - t0, 1)
-            inner0, inner1 = rx0 + 6 * s, rx1 - 6 * s
-            self.rail_xs = inner0 + (t - t0) / span * (inner1 - inner0)
-            for x in self.rail_xs:
-                box(x, ry0 + 8 * s, x + max(1.0, s), ry1 - 3 * s, UI_DIM, 0.7)
-            # year labels along the top edge
-            y0 = datetime.fromtimestamp(t0, timezone.utc).year
-            y1 = datetime.fromtimestamp(t1, timezone.utc).year
-            last_x = -1e9
-            for yr in range(y0 + 1, y1 + 1):
-                ts = datetime(yr, 1, 1, tzinfo=timezone.utc).timestamp()
-                x = inner0 + (ts - t0) / span * (inner1 - inner0)
-                if x - last_x < 4 * len(str(yr)) * cws:
-                    continue
-                box(x, ry0 + 2 * s, x + max(1.0, s), ry0 + 8 * s, UI_DIM, 0.9)
-                label(x + 2 * s, ry0 + 1 * s, str(yr), small, UI_DIM)
-                last_x = x
-            marks = [(self.rev_i, YELLOW)]
-            if self.compare_i is not None:
-                marks.append((self.compare_i, TEAL_UI))
-            if self.rev_loading is not None:
-                marks.append((self.rev_loading, UI_TEXT))
-            tags = []                  # (x0, x1, row) of the tags placed so far
-            th = ry1 - 1 * s - (ry0 + 9 * s)
-            for i, col in marks:
-                x = self.rail_xs[i]
-                box(x - 1 * s, ry0 + 5 * s, x + 2 * s, ry1 - 2 * s, col, 1.0)
-                tag = ("HEAD " if i == 0 else "") + self.rev_label(i)
-                tw = len(tag) * cws + 2 * pad
-                right, left = x + 5 * s, x - 5 * s - tw
-                # right of the marker inside the rail, else left, else the
-                # same two places on a row above the rail (when one tag
-                # spans the other's marker both inside places collide)
-                for tx, row in ((right, 0), (left, 0), (right, 1), (left, 1)):
-                    if tx < rx0 or tx + tw > rx1:
-                        continue
-                    if not any(r == row and tx < b1 and tx + tw > b0 for b0, b1, r in tags):
-                        break
-                tags.append((tx, tx + tw, row))
-                ty = ry0 + 9 * s - row * (th + 3 * s)
-                box(tx, ty, tx + tw, ty + th, UI_BOX, 0.95)
-                label(tx + pad, ty + 1 * s, tag, small, col)
-            if cur is not None and in_rect(cur[0], cur[1], self.rail_rect):
-                self.rail_hover = self.rail_rev_at(cur[0])
-
         # the right column: status line, filter box, results panel. With the
         # panel open the column is its own strip beside the map and the
-        # status wraps to the panel's width; otherwise the status line and
-        # the filter box sit in the top right corner over the map.
+        # status wraps to the panel's width; otherwise the filter box sits
+        # alone in the top right corner.
         pw = PANEL_PT * s
         cx0, cx1 = self.fb_w - m - pw, self.fb_w - m
         if self.panel_rows:               # the column: status (wrapped), filter box, panel
@@ -2571,7 +1638,7 @@ class Viewer:
             for k, part in enumerate(parts):
                 label(cx0 + pad, m + pad * 0.6 + k * row_h, part, small)
             fy0 = sy1 + m
-        else:                             # the filter box shares the top strip with the toolbar
+        else:
             fy0 = m
         fy1 = fy0 + size + 2 * pad * 0.6
         self.filter_rect = (cx0, fy0, cx1, fy1)
@@ -2597,7 +1664,7 @@ class Viewer:
             for k in range(top, min(len(self.panel_rows), top + n_vis)):
                 text, color, ri = self.panel_rows[k]
                 y = py0 + 4 * s + (k - top) * row_h
-                if isinstance(ri, int) and ri >= 0 and ri == self.result_i:
+                if ri >= 0 and ri == self.result_i:
                     box(self.panel_rect[0] + 2 * s, y, self.panel_rect[2] - 2 * s, y + row_h,
                         YELLOW, 0.25)
                 label(self.panel_rect[0] + pad, y + (row_h - small) / 2, text, small, color,
@@ -2605,8 +1672,8 @@ class Viewer:
         else:
             self.panel_rect = None
 
-        # hover label next to the cursor (the rail's revision when over the rail)
-        text = self.rail_hover_text() if self.rail_hover is not None else self.hover_label()
+        # hover label next to the cursor
+        text = self.hover_label()
         cur = self.cursor_override if self.scripted else self.cursor
         if text and cur is not None:
             bw = len(text) * cw + 2 * pad
@@ -2641,7 +1708,7 @@ class Viewer:
             self.draw_instanced("wall", 4 * (self.n_files + self.n_dirs))
         glUseProgram(self.prog["file"])
         glUniform1i(self.uniform("file", "uRingOnly"), 0)
-        glUniform1i(self.uniform("file", "uLens"), self.lens_code())
+        glUniform1i(self.uniform("file", "uTint"), 1 if self.tint_on else 0)
         self.draw_instanced("file", self.n_files)
         self.draw_rects(self.band_instances())      # kind bands under the bars
         self.draw_visible_lines()
@@ -2669,7 +1736,6 @@ class Viewer:
     def frame(self, dt):
         t = time.perf_counter()
         self.poll_search()
-        self.poll_revision()
         self.update_glide(dt)
         self.update_fly()
         self.render()
@@ -2686,26 +1752,9 @@ class Viewer:
                   f"max {ft.max():.2f} ms")
 
     # ---- runs -----------------------------------------------------------
-    def rev_index(self, spec):
-        """A revision table index from a hash prefix or ~N (N back from HEAD)."""
-        if self.hist is None:
-            raise SystemExit(f"error: --rev/--compare need {self.head_dir}/history.npz; run ./atlas_history.py {self.head_dir}")
-        revs = self.hist["json"]["revisions"]
-        if spec.startswith("~") and spec[1:].isdigit():
-            return min(int(spec[1:]), len(revs) - 1)
-        m = [i for i, r in enumerate(revs) if r["hash"].startswith(spec)]
-        if len(m) != 1:
-            raise SystemExit(f"error: revision '{spec}' matches {len(m)} commits in the table")
-        return m[0]
-
     def apply_script_flags(self):
         args = self.args
         held = False
-        if getattr(args, "compare", None):
-            self.set_compare(self.rev_index(args.compare))
-        if getattr(args, "rev", None):
-            self.load_revision(self.rev_index(args.rev), sync=True)
-            held = True
         if args.goto:
             self.goto(args.goto, complete=True)
             self.settle_focus()
@@ -2718,33 +1767,10 @@ class Viewer:
             held = True
         if args.step is not None:
             if self.results is None or len(self.results["order"]) == 0:
-                raise SystemExit("error: --step needs results; give --filter WORD with hits")
+                raise SystemExit("error: --step needs hits; give --filter WORD with hits")
             self.goto_result((args.step - 1) % len(self.results["order"]), complete=True)
             held = True
-        if args.select:
-            files = []
-            for path in args.select.split(","):
-                m = [i for i, p in enumerate(self.paths) if p == path or p.endswith("/" + path)]
-                if not m:
-                    raise SystemExit(f"error: --select: no file matches '{path}'")
-                files.append(min(m, key=lambda i: len(self.paths[i])))
-            self.select_files(files)
-            held = True
-        if args.inspector:
-            if self.res is None:
-                raise SystemExit("error: --inspector needs resolve.npz; run atlas_resolve.py first")
-            self.toggle_inspector(True)
-            held = True
-        if args.inspect:
-            if self.res is None:
-                raise SystemExit("error: --inspect needs resolve.npz; run atlas_resolve.py first")
-            nm = self.res["name_id"].get(args.inspect)
-            ents = np.flatnonzero(self.res["ent_name"] == nm) if nm is not None else []
-            if len(ents) == 0:
-                raise SystemExit(f"error: --inspect: no entity named '{args.inspect}'")
-            self.select_symbol(("ent", int(ents[0])))
-            held = True
-        if args.hover:
+        if getattr(args, "hover", None):
             path, line, col = args.hover.rsplit(":", 2)
             f = next(i for i, pth in enumerate(self.paths) if pth == path or pth.endswith("/" + path))
             gl = int(self.a["file_line0"][f]) + int(line) - 1
@@ -2791,6 +1817,10 @@ class Viewer:
         print(f"frames: {len(self.frame_times)}")
 
     def run_shots(self):
+        """--shots DIR: the standard set. The fitted map, the rungs at 2,
+        4.5 and 16 px per line, the hover label, the filter and its first
+        hit, the 3D projection fitted and close, and the tint when the
+        corpus has one."""
         out = Path(self.args.shots)
         out.mkdir(parents=True, exist_ok=True)
         word = self.args.filter
@@ -2821,50 +1851,20 @@ class Viewer:
         if self.results is not None and len(self.results["order"]):
             self.goto_result((self.args.step or 1) - 1, complete=True)
         snap("result.png")
-        if "references" in self.metrics:
-            self.set_filter("")
-            self.set_metric("references")
+        self.set_filter("")
+        # the 3D projection: the whole map tilted, then a close pass
+        self.tilt, self.yaw = 55.0, 12.0
+        self.set_proj("3d")
+        self.fit()
+        snap("3d.png")
+        self.set_zoom_ppl(3.0, centre)
+        snap("3d_zoom.png")
+        self.set_proj("2d")
+        if self.tint is not None:
+            self.set_tint(True)
             self.fit()
-            snap("references.png")
-            # the 3D projection: the whole map tilted, then a close pass
-            self.tilt, self.yaw = 55.0, 12.0
-            self.set_proj("3d")
-            self.fit()
-            snap("3d.png")
-            self.set_zoom_ppl(3.0, centre)
-            snap("3d_zoom.png")
-            self.set_proj("2d")
-            self.set_metric("tokens")
-        if self.has_layers and self.res is not None:
-            self.set_lens("layers")
-            self.fit()
-            snap("layers.png")
-            top = int(np.argmax(self.res["file_refs_in"]))
-            self.select_files([top])
-            self.fit()
-            snap("selection.png")
-            self.clear_selection()
-            self.toggle_inspector(False)
-            self.set_lens("folders")
-        if self.hist is not None:
-            for name in ("churn", "age"):
-                self.set_color(name)
-                self.fit()
-                snap(f"{name}.png")
-            back = min(100, len(self.hist["rev_time"]) - 1)
-            if back > 0:
-                self.rail_show = True
-                self.set_compare(back)
-                self.fit()
-                snap("changes.png")
-                self.compare_i = None
-                self.set_color("none")
-                self.load_revision(back, sync=True)
-                self.fit()
-                snap("history.png")
-                self.load_revision(0)
-                self.rail_show = False
-            self.set_color("none")
+            snap(f"{self.tint_label or 'tint'}.png")
+            self.set_tint(False)
         if self.args.stats:
             self.print_stats()
 
@@ -2882,7 +1882,7 @@ class Viewer:
                 fps = fps_n / (now - fps_t)
                 ppl = self.ref_pitch() * self.zoom
                 glfw.set_window_title(
-                    self.win, f"code atlas: {self.name} | {fps:5.1f} fps | "
+                    self.win, f"big-text: {self.name} | {fps:5.1f} fps | "
                               f"{ppl:.1f} px/line at centre")
                 fps_t, fps_n = now, 0
             if len(self.frame_times) > 10000:
@@ -2893,7 +1893,8 @@ class Viewer:
               f"{self.n_dirs} dirs; loaded in {self.load_seconds * 1000:.0f} ms, "
               f"GPU {self.gpu_bytes / 1e6:.1f} MB in {self.gpu_seconds * 1000:.0f} ms; "
               f"framebuffer {self.fb_w}x{self.fb_h} ({self.px:g}x)"
-              + (f"; vector text from {VT_MIN_PPL:g} px per line" if self.vt is not None else ""))
+              + (f"; vector text from {VT_MIN_PPL:g} px per line" if self.vt is not None else "")
+              + (f"; tint: {self.tint_label}" if self.tint is not None else ""))
         try:
             if self.args.shots:
                 self.run_shots()
@@ -2941,35 +1942,17 @@ def main():
     ap.add_argument("--zoom", type=float, default=None, metavar="PX_PER_LINE",
                     help="zoom so the file under the view centre has this many device px per line")
     ap.add_argument("--filter", default=None, metavar="WORD", help="apply a filter")
-    ap.add_argument("--step", type=int, default=None, metavar="K", help="step to result K (1-based)")
+    ap.add_argument("--step", type=int, default=None, metavar="K", help="step to hit K (1-based)")
     ap.add_argument("--proj", default=None, choices=["2d", "3d"],
                     help="start in 2D (default) or the tilted 3D projection; 3 toggles, Alt-drag tilts")
     ap.add_argument("--tilt", type=float, default=None, help="3D tilt in degrees (default 55)")
     ap.add_argument("--yaw", type=float, default=None, help="3D turn in degrees (default 0)")
-    ap.add_argument("--lens", default=None, choices=["folders", "layers"],
-                    help="start in the Folders treemap (default) or the Layers lens (needs the "
-                         "layers layout from atlas_layout.py, which needs resolve.npz)")
-    ap.add_argument("--select", default=None, metavar="PATH[,PATH...]",
-                    help="select these files and light their neighbourhood (for screenshots)")
-    ap.add_argument("--metric", default=None, choices=METRIC_ORDER,
-                    help="start with this metric's layout (default tokens); M cycles them")
-    ap.add_argument("--inspector", action="store_true",
-                    help="open the Inspector with nothing selected (the coverage block)")
-    ap.add_argument("--inspect", default=None, metavar="NAME",
-                    help="open the Inspector on the first entity of that name (needs resolve.npz)")
+    ap.add_argument("--tint", action="store_true",
+                    help="start with the tint on, when the index has one; C toggles it")
     ap.add_argument("--no-hover", action="store_true",
                     help="scripted frames: no hover highlight or label on the file under the centre")
     ap.add_argument("--hover", default=None, metavar="PATH:LINE:COL",
                     help="fly there and hold the cursor on that cell (for screenshots)")
-    ap.add_argument("--color", default=None, choices=LENSES[1:],
-                    help="start with a colour lens (needs history.npz from atlas_history.py); C cycles them")
-    ap.add_argument("--since", type=int, default=None, metavar="DAYS",
-                    help="window the churn lens to the last DAYS days (default: all history)")
-    ap.add_argument("--history", action="store_true", help="show the revision rail; H toggles it")
-    ap.add_argument("--rev", default=None, metavar="HASH",
-                    help="load the corpus at this commit (a hash prefix, or an index into the table like ~100)")
-    ap.add_argument("--compare", default=None, metavar="HASH",
-                    help="the second revision of the Changes lens (hash prefix or ~N)")
     ap.add_argument("--shots", default=None, metavar="DIR",
                     help="write the standard screenshot set to DIR and exit")
     ap.add_argument("--stats", action="store_true",

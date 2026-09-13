@@ -5,14 +5,16 @@ Reads data/<name>_atlas/index.npz + index.json and writes layout.npz +
 layout.json (see docs/DESIGN.md for the arrays). The root is [0, 1600] by
 [0, 1600 / aspect] in world units, y down. Every directory is inset by its
 padding (the band the viewer draws in the directory's hue) and its files and
-subdirectories are squarified inside, biggest first. A file is split into k
-equal columns so that its text is as large as possible while a column still
-holds the file's typical line length; lines longer than a column are clipped.
+subdirectories are squarified inside, biggest first, each file's area its
+weight: tokens for code, lines for a book. A file is split into k equal
+columns so that its text is as large as possible while a column still holds
+the file's typical line length; lines longer than a column wrap inside it.
+A book (index.json "corpus": "book") is laid out in reading order instead,
+parts as bands of page rows, and its layout is flat: nothing rises in 3D.
 
-  ./atlas_layout.py data/big-picture_atlas --preview docs/shots/big-picture_layout.png
+  ./atlas_layout.py data/big-text_atlas --preview docs/shots/big-text_layout.png
 """
 import argparse
-from pathlib import Path
 import json
 import math
 import os
@@ -108,20 +110,8 @@ def layout_tree(dirs, file_weight, file_dir, world):
         dir_pad[d] = pad
         kids = [(file_weight[f], 0, f) for f in dirs[d]["files"]] \
             + [(dir_weight[c], 1, c) for c in dirs[d]["children"]]
-        if dirs[d].get("rows"):           # the Layers lens: children stacked top to bottom
-            # row heights by weight^0.6, so a giant cycle does not squeeze
-            # the thin layers above and below it into slivers
-            shares = [max(k[0], 1e-9) ** 0.6 for k in kids]
-            total = sum(shares) or 1.0
-            h = (y1 - y0 - 2 * pad)
-            rects, y = [], y0 + pad
-            for share in shares:
-                dy = h * share / total
-                rects.append((x0 + pad, y, x1 - pad, y + dy))
-                y += dy
-        else:
-            kids.sort(key=lambda k: -k[0])
-            rects = squarify([k[0] for k in kids], x0 + pad, y0 + pad, x1 - pad, y1 - pad)
+        kids.sort(key=lambda k: -k[0])
+        rects = squarify([k[0] for k in kids], x0 + pad, y0 + pad, x1 - pad, y1 - pad)
         for (wt, is_dir, idx), r in zip(kids, rects):
             if is_dir:
                 place(idx, tuple(r))
@@ -173,125 +163,6 @@ def book_layout(dirs, world, page_aspect):
     return dir_rect, dir_pad, file_rect, cols
 
 
-# ---------------------------------------------------------------- layers
-
-def file_graph(resolve_path, n_files):
-    """Directed edges between files: A -> B when a reference in A resolves
-    to an entity defined in B. Returns (src, dst, count)."""
-    r = np.load(resolve_path)
-    ok = r["ref_ent"] >= 0
-    src = r["ref_file"][ok].astype(np.int64)
-    dst = r["ent_file"][r["ref_ent"][ok]].astype(np.int64)
-    m = src != dst
-    key = src[m] * n_files + dst[m]
-    u, cnt = np.unique(key, return_counts=True)
-    return u // n_files, u % n_files, cnt
-
-
-def strongly_connected(n, src, dst):
-    """Tarjan, iterative. Component ids come out in reverse topological
-    order: every successor of a component has a smaller id."""
-    adj = [[] for _ in range(n)]
-    for a, b in zip(src.tolist(), dst.tolist()):
-        adj[a].append(b)
-    index, low, on, comp = [-1] * n, [0] * n, [False] * n, [-1] * n
-    stack, counter, ncomp = [], 0, 0
-    for root in range(n):
-        if index[root] != -1:
-            continue
-        work = [(root, 0)]
-        while work:
-            v, i = work[-1]
-            if i == 0:
-                index[v] = low[v] = counter
-                counter += 1
-                stack.append(v)
-                on[v] = True
-            recurse = False
-            while i < len(adj[v]):
-                w = adj[v][i]
-                i += 1
-                if index[w] == -1:
-                    work[-1] = (v, i)
-                    work.append((w, 0))
-                    recurse = True
-                    break
-                elif on[w]:
-                    low[v] = min(low[v], index[w])
-            if recurse:
-                continue
-            work[-1] = (v, i)
-            if low[v] == index[v]:
-                while True:
-                    w = stack.pop()
-                    on[w] = False
-                    comp[w] = ncomp
-                    if w == v:
-                        break
-                ncomp += 1
-            work.pop()
-            if work:
-                u, _ = work[-1]
-                low[u] = min(low[u], low[v])
-    return np.array(comp, np.int64), ncomp
-
-
-def layers_dirs(meta, resolve_path, weight):
-    """The Layers lens as a pseudo directory tree: rank rows (highest rank
-    on top) holding files and, for cycles of more than one file, a group.
-    Rank is the longest path down to a file that references nothing in the
-    corpus; files with no edges at all sit in a bottom row of their own."""
-    n = len(meta["files"])
-    src, dst, cnt = file_graph(resolve_path, n)
-    comp, ncomp = strongly_connected(n, src, dst)
-    csrc, cdst = comp[src], comp[dst]
-    succ = [set() for _ in range(ncomp)]
-    for a, b in zip(csrc.tolist(), cdst.tolist()):
-        if a != b:
-            succ[a].add(b)
-    rank = np.zeros(ncomp, np.int64)
-    for c in range(ncomp):                 # successors have smaller ids
-        rank[c] = max((rank[d] + 1 for d in succ[c]), default=0)
-    connected = np.zeros(n, bool)
-    connected[src] = True
-    connected[dst] = True
-    file_rank = np.where(connected, rank[comp], -1)
-    members = [[] for _ in range(ncomp)]
-    for f in range(n):
-        members[comp[f]].append(f)
-    dirs = [{"path": "", "parent": -1, "children": [], "files": [], "top": 0,
-             "label": meta["name"], "rows": True, "hue": 0}]
-    file_dir = np.zeros(n, np.int64)
-    for r in sorted(set(file_rank.tolist()), reverse=True):
-        in_row = np.flatnonzero(file_rank == r)
-        row = len(dirs)
-        label = f"layer {r} · {len(in_row)} files" if r >= 0 else f"no references · {len(in_row)} files"
-        dirs.append({"path": f"layer{r}", "parent": 0, "children": [], "files": [], "top": row,
-                     "label": label, "hue": (r % 12) if r >= 0 else 0})
-        dirs[0]["children"].append(row)
-        done = set()
-        for f in sorted(in_row.tolist(), key=lambda f: meta["files"][f]["path"]):
-            c = int(comp[f])
-            if len(members[c]) > 1:
-                if c in done:
-                    continue
-                done.add(c)
-                g = len(dirs)
-                dirs.append({"path": f"layer{r}/cycle{c}", "parent": row, "children": [],
-                             "files": list(members[c]), "top": row,
-                             "label": f"cycle · {len(members[c])} files", "hue": dirs[row]["hue"]})
-                dirs[row]["children"].append(g)
-                for m in members[c]:
-                    file_dir[m] = g
-            else:
-                dirs[row]["files"].append(f)
-                file_dir[f] = row
-    stats = {"edges": int(len(src)), "cycles": int(sum(1 for m in members if len(m) > 1)),
-             "in_cycles": int(sum(len(m) for m in members if len(m) > 1)),
-             "layers": int(file_rank.max()) + 1, "unconnected": int((~connected).sum())}
-    return dirs, file_dir, stats
-
-
 # ---------------------------------------------------------------- files
 
 def file_columns(w, h, n, target, char_aspect):
@@ -319,7 +190,7 @@ def file_columns(w, h, n, target, char_aspect):
 
 def file_tokens(kinds, line_off, file_line0):
     """Tokens per file: runs of one non-space kind, restarted at every line
-    (lines are stored with no separator). The video's default area metric."""
+    (lines are stored with no separator): the code adapter's weight."""
     kinds = kinds.astype(np.int16)
     prev = np.concatenate(([0], kinds[:-1]))
     start = (kinds != 0) & (prev != kinds)
@@ -539,58 +410,37 @@ def parse_aspect(text):
     return float(text)
 
 
-METRICS = ["tokens", "references", "churn", "lines", "chars", "bytes"]
+def file_weight(z, meta):
+    """(name, weight per file): the area every file gets. Tokens for code;
+    lines for a book, so every full page is one cell of one size and stands
+    level in 3D, only a short last page dipping."""
+    if meta.get("corpus") == "book":
+        return "lines", np.diff(z["file_line0"]).astype(np.float64)
+    return "tokens", file_tokens(z["kinds"], z["line_off"], z["file_line0"])
 
 
-def file_metric(name, z, files, file_line0, atlas):
-    if name == "tokens":
-        return file_tokens(z["kinds"], z["line_off"], file_line0)
-    if name == "references":
-        rp = Path(atlas) / "resolve.npz"
-        if not rp.exists():
-            return None
-        return np.load(rp)["file_refs_in"].astype(np.float64)
-    if name == "churn":
-        hp = Path(atlas) / "history.npz"
-        if not hp.exists():
-            return None
-        hz = np.load(hp)
-        # lines added plus removed over the whole history, floored at 1 so
-        # an untouched file keeps a sliver
-        return np.maximum(hz["file_added"].astype(np.float64) + hz["file_removed"], 1.0)
-    if name == "chars":
-        return z["file_chars"].astype(np.float64)
-    if name == "lines":
-        return np.diff(file_line0).astype(np.float64)
-    return np.array([f["bytes"] for f in files], np.float64)
-
-
-def build_layout(args, z, meta, metric_name, metric, t0, lens="folders"):
+def build_layout(args, z, meta, t0):
     dirs, files = meta["dirs"], meta["files"]
     file_line0, line_len, line_indent = z["file_line0"], z["line_len"], z["line_indent"]
     file_dir = z["file_dir"].astype(np.int64)
     n_files, n_lines = len(files), len(line_len)
     aspect = parse_aspect(args.aspect)
     world = np.array([WORLD_W, WORLD_W / aspect])
+    weight_name, metric = file_weight(z, meta)
     weight = np.maximum(metric, 1.0)          # an empty file still gets a sliver
+    flat = meta.get("corpus") == "book"       # a book is one flat sheet: nothing rises in 3D
 
     # hue: the top-level directory's position among the root's children, plus
-    # one so that the root and its loose files (hue 0) differ from the first;
-    # files keep their tree's hue in every lens
+    # one so that the root and its loose files (hue 0) differ from the first
     top_hue = np.zeros(len(dirs), np.int64)
     for i, c in enumerate(dirs[0]["children"]):
         top_hue[c] = (i + 1) % N_HUES
     tree_hue = np.array([top_hue[d["top"]] for d in dirs], np.int64)
     file_hue = tree_hue[file_dir]
-    lens_stats = {}
-    if lens == "layers":
-        dirs, file_dir, lens_stats = layers_dirs(meta, Path(args.atlas) / "resolve.npz", weight)
-        dir_hue = np.array([d["hue"] for d in dirs], np.int64)
-    else:
-        dir_hue = tree_hue
+    dir_hue = tree_hue
     n_dirs = len(dirs)
     page, book_cols = None, 0
-    if meta.get("corpus") == "book":
+    if flat:
         # a page cell's aspect: the book's line width by its fullest page
         page = (int(meta.get("page_lines", np.diff(file_line0).max())), int(np.percentile(line_len, 99.5)))
         dir_rect, dir_pad, file_rect, book_cols = book_layout(dirs, world, page[1] * args.char_aspect / (page[0] + 2))
@@ -614,10 +464,7 @@ def build_layout(args, z, meta, metric_name, metric, t0, lens="folders"):
     e_row = line_row0[ge] - file_row0[f]
     irect, iitem = item_rects(z["item_file"], s_row, e_row, file_rect, file_row0, pitch, rows, colw)
 
-    # layout.npz is the layout the viewer opens with: tokens for code, a book's one layout
-    primary = metric_name == "tokens" or meta.get("corpus") == "book"
-    suffix = "_layers" if lens == "layers" else ("" if primary else "_" + metric_name)
-    np.savez(os.path.join(args.atlas, f"layout{suffix}.npz"),
+    np.savez(os.path.join(args.atlas, "layout.npz"),
              world=world.astype(np.float64),
              dir_rect=dir_rect.astype(np.float64), dir_pad=dir_pad.astype(np.float64),
              dir_depth=dir_depth.astype(np.uint16), dir_hue=dir_hue.astype(np.uint8),
@@ -625,7 +472,7 @@ def build_layout(args, z, meta, metric_name, metric, t0, lens="folders"):
              file_cols=cols.astype(np.uint16), file_rows=rows.astype(np.uint32),
              file_cap=cap.astype(np.uint16), file_colw=colw.astype(np.float64),
              file_hue=file_hue.astype(np.uint8), file_row0=file_row0.astype(np.uint32),
-             file_metric=np.asarray(metric, np.float64), file_dir=np.asarray(file_dir, np.uint32),
+             file_weight=np.asarray(metric, np.float64), file_dir=np.asarray(file_dir, np.uint32),
              line_row0=line_row0.astype(np.uint32), row_line=row_line.astype(np.uint32),
              row_col0=row_col0.astype(np.uint16), row_len=row_len.astype(np.uint16),
              row_pos=row_pos.astype(np.float32),
@@ -637,23 +484,21 @@ def build_layout(args, z, meta, metric_name, metric, t0, lens="folders"):
                       "depth": int(dir_depth[d]), "hue": int(dir_hue[d]),
                       "parent": int(dirs[d]["parent"]), "children": [int(c) for c in dirs[d]["children"]],
                       "files": [int(f) for f in dirs[d]["files"]]})
-    with open(os.path.join(args.atlas, f"layout{suffix}.json"), "w") as fh:
+    with open(os.path.join(args.atlas, "layout.json"), "w") as fh:
         json.dump({"world": [float(world[0]), float(world[1])], "aspect": args.aspect,
-                   "metric": metric_name, "lens": lens, "char_aspect": args.char_aspect,
-                   "hang": HANG, "lens_stats": lens_stats, "dirs": jdirs}, fh)
+                   "weight": weight_name, "flat": bool(flat), "char_aspect": args.char_aspect,
+                   "hang": HANG, "dirs": jdirs}, fh)
 
     sides = np.minimum(file_rect[:, 2] - file_rect[:, 0], file_rect[:, 3] - file_rect[:, 1])
     n_rows = len(row_line)
-    print(f"{args.atlas} [{lens if lens != 'folders' else metric_name}]: {n_files} files, {n_dirs} dirs, "
-          + (f"{lens_stats['layers']} layers, {lens_stats['cycles']} cycles of {lens_stats['in_cycles']} files, "
-             f"{lens_stats['unconnected']} unconnected; " if lens_stats else "")
+    print(f"{args.atlas} [{weight_name}]: {n_files} files, {n_dirs} dirs, "
           + (f"{book_cols} pages across, " if book_cols else "")
           + f"{n_lines} lines in "
           f"{n_rows} rows ({n_rows - n_lines} wrapped), {len(irect)} item rects; "
           f"world {world[0]:.0f}x{world[1]:.1f}, pitch {pitch.min():.4f}..{pitch.max():.3f} "
           f"(median {np.median(pitch):.3f}), columns 1..{cols.max()} (mean {cols.mean():.2f}), "
           f"{int((sides < 0.02).sum())} slivers under 0.02, {time.time() - t0:.2f}s")
-    if args.preview and lens == "folders" and metric_name == (args.metric if args.metric != "all" else "tokens"):
+    if args.preview:
         render_preview(args.preview, world, jdirs, dir_rect, dir_pad, dir_hue, file_rect,
                        file_hue, pitch, cols, rows, cap, colw, file_row0, row_pos, row_len,
                        row_indent, args.char_aspect, args.preview_width)
@@ -664,18 +509,11 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("atlas", metavar="ATLAS_DIR", help="data/<name>_atlas with index.npz + index.json")
     ap.add_argument("--aspect", default="16:9", help="world aspect W:H (default 16:9)")
-    ap.add_argument("--metric", choices=["all"] + METRICS, default="all",
-                    help="file size metric for the treemap; 'all' (default) writes layout.npz "
-                         "(tokens) plus layout_references.npz (when resolve.npz exists) and "
-                         "layout_lines.npz, which the viewer switches between")
-    ap.add_argument("--lens", choices=["all", "folders", "layers"], default="all",
-                    help="folders: the directory treemap; layers: files in rows by dependency rank "
-                         "with cycles grouped (needs resolve.npz); all (default) writes both")
     ap.add_argument("--char-aspect", type=float, default=None,
                     help="character advance / line pitch of the font (default: atlas_font.py's "
                          "metric for the bundled font, JetBrains Mono NL 0.571; 0.6 if it is missing)")
     ap.add_argument("--preview", default=None, metavar="PNG",
-                    help="render the tokens layout with Pillow at 2400 px wide")
+                    help="render the layout with Pillow at 2400 px wide")
     ap.add_argument("--preview-width", type=int, default=2400,
                     help="preview width in pixels (default 2400)")
     args = ap.parse_args()
@@ -686,26 +524,7 @@ def main():
     z = np.load(os.path.join(args.atlas, "index.npz"))
     with open(os.path.join(args.atlas, "index.json")) as f:
         meta = json.load(f)
-    names = ["tokens", "references", "churn", "lines"] if args.metric == "all" else [args.metric]
-    if meta.get("corpus") == "book" and args.metric == "all":
-        names = ["lines"]                 # every page is one cell whatever the metric; lines
-                                          # keeps full pages level in 3D, only a short last page dips
-    for name in names:
-        metric = file_metric(name, z, meta["files"], z["file_line0"], args.atlas)
-        if metric is None:
-            if args.metric == "all":
-                continue
-            need = "history.npz; run ./atlas_history.py" if name == "churn" else "resolve.npz; run ./atlas_resolve.py"
-            raise SystemExit(f"error: --metric {name} needs {args.atlas}/{need} {args.atlas}")
-        if args.lens in ("folders", "all"):
-            build_layout(args, z, meta, name, metric, t0)
-    if args.lens in ("layers", "all"):
-        if (Path(args.atlas) / "resolve.npz").exists():
-            metric = file_metric("tokens", z, meta["files"], z["file_line0"], args.atlas)
-            build_layout(args, z, meta, "tokens", metric, t0, lens="layers")
-        elif args.lens == "layers":
-            raise SystemExit(f"error: --lens layers needs {args.atlas}/resolve.npz; "
-                             f"run ./atlas_resolve.py {args.atlas}")
+    build_layout(args, z, meta, t0)
 
 
 if __name__ == "__main__":

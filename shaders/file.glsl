@@ -1,16 +1,15 @@
 // file.glsl: instanced file rectangles. Per instance: tex_file_f (RGBA32F,
 // three texels per file: rect, (pitch, colw, cap, hue), (z base, height,
-// lens value, lens class)) and tex_file_u (RGBA8UI, one texel per file: (rung, flags, step
-// lo, step hi); flags bit 0 hovered, bit 1 has hits, bit 2 current result,
-// bit 3 dimmed, bit 4 selected, bit 5 a neighbour of the selection).
+// tint, unused)) and tex_file_u (RGBA8UI, one texel per file: (rung, flags,
+// step lo, step hi); flags bit 0 hovered, bit 1 has hits, bit 2 current hit,
+// bit 3 dimmed).
 // Invisible files become a degenerate quad. Every rung draws
 // the dark file background under the lines (the hue is only in the
 // directory bands). The border is in device pixels, computed from the world
 // distance to the edge and fwidth so it holds in perspective: 1 grey, 2
 // yellow for hit files, 3 yellow for the current result. The ring pass
-// (uRingOnly) redraws just the border after the text. uLens tints the fill
-// from the file's lens value and class (0 none, 1 churn, 2 age, 3 changes
-// where class 1 is an added file and 2 a changed one).
+// (uRingOnly) redraws just the border after the text. uTint mixes the fill
+// towards ember by the file's tint value, 0..1.
 #version 330 core
 layout(location = 0) in vec2 aQuad;
 uniform sampler2D uFileF;
@@ -26,7 +25,7 @@ flat out vec4 vRect;
 flat out ivec2 vRF;         // rung, flags
 flat out vec3 vTile;
 flat out int vRing;
-flat out vec2 vLensV;
+flat out float vTint;
 
 ivec2 tc(int i) { return ivec2(i & 4095, i >> 12); }
 
@@ -51,7 +50,7 @@ void main() {
     vRF = ivec2(int(fu.x), int(fu.y));
     vTile = uHue[int(meta.w) % 12];
     vRing = uRingOnly;
-    vLensV = zz.zw;
+    vTint = zz.z;
 }
 // ---- fragment ----
 #version 330 core
@@ -60,8 +59,8 @@ flat in vec4 vRect;
 flat in ivec2 vRF;
 flat in vec3 vTile;
 flat in int vRing;
-flat in vec2 vLensV;
-uniform int uLens;
+flat in float vTint;
+uniform int uTint;
 out vec4 frag;
 
 const vec3 BG     = vec3(0x1c, 0x1c, 0x1e) / 255.0;
@@ -69,40 +68,27 @@ const vec3 FILEBG = vec3(0x11, 0x11, 0x14) / 255.0;
 const vec3 GREY   = vec3(0x8a, 0x8f, 0x9a) / 255.0;
 const vec3 YELLOW = vec3(0xe8, 0xd4, 0x4d) / 255.0;
 const vec3 HOVER  = vec3(0xdf, 0xe3, 0xec) / 255.0;
-const vec3 TEAL   = vec3(0x5f, 0xb7, 0xb7) / 255.0;
 const vec3 EMBER  = vec3(0xc8, 0x60, 0x40) / 255.0;
-const vec3 AMBER  = vec3(0xe0, 0xa0, 0x40) / 255.0;
-const vec3 GREEN  = vec3(0x7f, 0xbf, 0x7f) / 255.0;
 
 void main() {
     int rung = vRF.x, flags = vRF.y;
     bool hovered = (flags & 1) != 0, hit = (flags & 2) != 0;
     bool current = (flags & 4) != 0, dimmed = (flags & 8) != 0;
-    bool selected = (flags & 16) != 0, neighbour = (flags & 32) != 0;
     // every rung shares the file background: the hue lives in the directory
     // bands only, so the rung 0/1 cut does not flip a file's colour
     vec3 col = FILEBG;
-    // the colour lens tints the fill only; bands, bars and glyphs stay
-    if (uLens == 1) col = mix(col, EMBER, 0.65 * vLensV.x);
-    else if (uLens == 2) col = mix(col, TEAL, 0.65 * vLensV.x);
-    else if (uLens == 3) {
-        if (vLensV.y > 1.5) col = mix(col, AMBER, 0.15 + 0.5 * vLensV.x);
-        else if (vLensV.y > 0.5) col = mix(col, GREEN, 0.55);
-    }
-    if (neighbour) col = mix(col, TEAL, 0.32);      // lit by the selection
-    if (selected) col = mix(col, HOVER, 0.28);
+    // the tint colours the fill only; bands, bars and glyphs stay
+    if (uTint == 1) col = mix(col, EMBER, 0.65 * vTint);
     if (dimmed) col *= 0.5;
     float d = min(min(vWorld.x - vRect.x, vRect.z - vWorld.x),
                   min(vWorld.y - vRect.y, vRect.w - vWorld.y));
     float px = max(fwidth(vWorld.x), fwidth(vWorld.y));   // world units per device pixel
-    float bw = (current || selected ? 3.0 : (hit ? 2.0 : (hovered ? 2.0 : 1.0))) * px;
+    float bw = (current ? 3.0 : (hit ? 2.0 : (hovered ? 2.0 : 1.0))) * px;
     // the border is drawn again after the lines (uRingOnly), so column-0
     // text never breaks the yellow hit outline; the fill pass skips it
     if (vRing == 1 && d >= bw) discard;
     if (d < bw) {
         if (hit || current) col = YELLOW;
-        else if (selected) col = HOVER;
-        else if (neighbour) col = TEAL;
         else if (hovered) col = mix(col, HOVER, 0.55);
         else col = mix(col, GREY, 0.7);
     }

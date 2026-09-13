@@ -442,7 +442,7 @@ def main():
 if __name__ == "__main__":
     main()
     # the real layout stage on the synthetic index, so the viewer's row
-    # format (wrapped rows, one layout per metric) is what the tests see
+    # format (wrapped rows) is what the tests see
     import subprocess
     out = "data/synthetic_atlas"
     for i, a in enumerate(sys.argv[1:]):
