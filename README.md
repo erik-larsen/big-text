@@ -6,8 +6,6 @@ big-text is the text-scale sibling of [big-picture](https://github.com/erik-lars
 
 *makepad's drawing and platform crates, 493 files and 280,607 lines, tilted into 3D with the churn lens: the most edited files glow ember, every roof carries its code at the rung its size allows, and the rail along the bottom is the repository's 689 commits.*
 
-This README is also the design document: the decisions, their reasons and the open questions live here rather than in a wiki, and the sections after the screenshots are written for someone deciding whether to build on this.
-
 It shows three kinds of content, in this order of priority: text, images, 2D vector work. Each has an open-source lineage that big-text builds on, and the ladder that ties them together has a fourth:
 
 | Content | Lineage | What it contributes | Where |
@@ -242,13 +240,13 @@ The vector tier was measured by `tests/bench_vt.py` before the Dobbie port was d
 | 300 | grid | 0.0012 | 0.0087 | 0.05 | 85 | 1059.0 | 2118 |
 | 300 | raster | 0.0212 | 0.1216 | 0.07 | 85 | 1.3 | 13 |
 
-A rerun of the harness today measures the Slug and raster tiers only, since the port no longer exists anywhere; the grid rows above are the phase 6 numbers. Slug halves the port's error at every size and has ten to forty times fewer sparkles; against the raster tier its error is lower even at 12 px, so the handoff `VT_MIN_PPL` is 12 px per line and the raster atlas serves only the 6 to 12 px band of the text rung. It costs 7 to 18 percent more time than the port, which fails the contract's tenth-slower rule at three of the four sizes by margins that are one or two hundredths of a millisecond per full screen; the phase went ahead on the copyright grounds it was set up for, and this is recorded as a decision to confirm. Vector text is on by default because at 12 px it takes 0.48 ms per screen against the raster tier's 0.24, exactly the rule's factor of two; `--no-vector-text` turns it off. ![the three tiers at 12 px](docs/shots/vt_bench_12.png) ![the three tiers at 96 px](docs/shots/vt_bench_96.png)
+A rerun of the harness today measures the Slug and raster tiers only, since the port no longer exists anywhere; the grid rows above are the phase 6 numbers. Slug halves the port's error at every size and has ten to forty times fewer sparkles; against the raster tier its error is lower even at 12 px, so the handoff `VT_MIN_PPL` is 12 px per line and the raster atlas serves only the 6 to 12 px band of the text rung. It costs 7 to 18 percent more time than the port, one or two hundredths of a millisecond per full screen, accepted for the accuracy and the licence. Vector text is on by default because at 12 px it takes 0.48 ms per screen against the raster tier's 0.24, exactly the rule's factor of two; `--no-vector-text` turns it off. ![the three tiers at 12 px](docs/shots/vt_bench_12.png) ![the three tiers at 96 px](docs/shots/vt_bench_96.png)
 
 Not built: the palette and legend buttons, and a streaming working set (the whole corpus is resident, which is fine to a few million lines).
 
 ## Decisions so far
 
-The six questions below were settled on 2026-09-12 for the first build, and the answers with the module contracts are in [docs/DESIGN.md](docs/DESIGN.md): a source tree as the corpus; a raster glyph atlas as the text rung with a Dobbie-style vector tier as an optional module; our own atlas generators with Pillow and fontTools; Python with OpenGL 3.3, GLES-compatible shaders, big-picture's conventions; no pyramid, the ladder is drawn from instance data; everything resident on the GPU, streaming later. Phases 0 to 4 of [docs/PARITY.md](docs/PARITY.md) built that: the ladder, the resolver and Inspector, wrapping and metric layouts, 3D, the Layers lens and selection. Next is phase 5, History. The questions stay here, with their answers revised, because the answers are provisional.
+The six questions below were settled on 2026-09-12 for the first build, and the answers with the module contracts are in [docs/DESIGN.md](docs/DESIGN.md): a source tree as the corpus; a raster glyph atlas as the text rung with a Dobbie-style vector tier as an optional module; our own atlas generators with Pillow and fontTools; Python with OpenGL 3.3, GLES-compatible shaders, big-picture's conventions; no pyramid, the ladder is drawn from instance data; everything resident on the GPU, streaming later. Phases 0 to 6 of [docs/PARITY.md](docs/PARITY.md) built that and what followed: the ladder, the resolver and Inspector, wrapping and metric layouts, 3D, the Layers lens and selection, History, and the vector tier on Slug. The questions below carry their current answers.
 
 ## Questions to settle
 
