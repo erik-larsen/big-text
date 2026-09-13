@@ -43,7 +43,8 @@ The line numbers in the `--goto` and `--hover` commands are the ones that held w
 
 ## The README's opening images
 
-- `big-text/hero.png`: big-text's own source fitted in 3D at tilt 55 and yaw 12 with the heights and the tint on: the most edited files ember, the roofs at the LODs their sizes allow.
+- `emscripten/overview.png`: emscripten fitted in 2D, the standard set's overview: 11,495 files on the bars LOD in their directories' hues, the die shot. The README's first image.
+- `big-text/hero.png`: big-text's own source fitted in 3D at tilt 55 and yaw 12 with the heights and the tint on: the most edited files ember, the roofs at the LODs their sizes allow. Not in the README.
 - `war-and-peace/hero.png`: War and Peace in 3D at tilt 55 and yaw 12, 3 px per line about page 481 (Book Five): one flat grid of pages in perspective (a book has no heights), the near pages at the text LOD, the far rows at bars. The README's second image.
 - `emscripten/hero.png`: the same on emscripten at 2.2 px per line about `tools/link.py` with the tint on: the near roofs at the tokens and text LODs, the far ones at bars. Not in the README.
 

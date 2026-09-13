@@ -2,8 +2,8 @@
 
 View millions of lines of source code, or a whole book, as one continuous surface. Zoom out and a codebase looks like a CPU die shot; zoom in and every glyph is crisp. No page turns, no mode switches, one camera, 2D or 3D views.
 
-![big-text's own source in 3D](docs/shots/big-text/hero.png)
-*Code atlas viewer of this repo*
+![emscripten, 11,495 files and 2.8 million lines, fitted in 2D: a die shot](docs/shots/emscripten/overview.png)
+*Code atlas view of emscripten*
 
 ![War and Peace flyover: one flat sheet of pages, the near ones as text, the far rows as line bars, the Books as coloured bands](docs/shots/war-and-peace/hero.png)
 *Book viewer of Tolstoy's War and Peace*
