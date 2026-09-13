@@ -126,7 +126,7 @@ def main():
     row, _ = v.row_of(line, col)
     lx, ly = v.a["row_pos"][int(row[0])]
     check(x0 <= lx <= x1 and y0 <= ly <= y1, "fly-to ended with the hit line in view")
-    check(v.lod[f] == 3, f"hit file at the text LOD after the fly (LOD {v.LOD[f]})")
+    check(v.lod[f] == 3, f"hit file at the text LOD after the fly (LOD {v.lod[f]})")
     check(v.current_file == f, "current result file flagged")
     v.on_key(w, glfw.KEY_UP, 0, glfw.PRESS, 0)
     check(v.result_i == len(v.results["order"]) - 1, "Up wraps to the last result")
@@ -149,7 +149,7 @@ def main():
     x0, y0, x1, y1 = v.view()
     r = v.a["file_rect"][f]
     check(x0 < r[2] and x1 > r[0] and y0 < r[3] and y1 > r[1] and v.lod[f] == 3,
-          f"--goto {path}:5 shows the file at LOD {v.LOD[f]}")
+          f"--goto {path}:5 shows the file at LOD {v.lod[f]}")
 
     # zoom limits hold
     v.on_cursor(w, cx, cy)
