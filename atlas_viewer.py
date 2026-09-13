@@ -55,7 +55,8 @@ H_MAX = 90.0             # tallest file in world units (the world is 1600 wide)
 DIR_STEP = 5.0           # terrace height per directory level
 TILT_MAX = 70.0
 FLY_V = 10.0             # van Wijk path units per second
-VT_MIN_PPL = 40.0        # --vector-text draws glyphs with the vector tier from here
+VT_MIN_PPL = 12.0        # --vector-text draws glyphs with the vector tier from here: the smallest size measured
+                         # by tests/bench_vt.py at which its error is below the raster tier's
 
 
 def rgb(h):
@@ -374,22 +375,23 @@ def run_search(atlas, word):
 
 
 def load_vector_tier(font, index):
-    """(atlas, glyph_table, metrics) of the Dobbie vector glyph tier for the
-    font, built in the same line box as the raster atlas so both tiers draw
-    a glyph at the same size and baseline; cached under data/ because the
-    build takes about 1.6 s."""
+    """(curves, bands, metrics) of the vector glyph tier for the font, built
+    in the same line box as the raster atlas so both tiers draw a glyph at
+    the same size and baseline, with its bands widened for VT_MIN_PPL;
+    cached under data/."""
     import vt_glyphs
     asc, desc, _, _, _ = atlas_font.font_box(font, index)
-    cache = HERE / "data" / f"vt_{Path(font).stem.lower()}_{index}_{asc}_{desc}.npz"
+    cache = HERE / "data" / f"vt_{Path(font).stem.lower()}_{index}_{asc}_{desc}_{VT_MIN_PPL:g}.npz"
     if cache.exists():
         return vt_glyphs.load(cache)
     t0 = time.perf_counter()
-    atlas, table, metrics = vt_glyphs.build_atlas(font, index, 12, box=(asc, desc))
+    curves, bands, metrics = vt_glyphs.build_atlas(font, index, min_ppl=VT_MIN_PPL, box=(asc, desc))
     cache.parent.mkdir(parents=True, exist_ok=True)
-    vt_glyphs.save(cache, atlas, table, metrics)
-    print(f"vector glyph atlas {atlas.shape[1]}x{atlas.shape[0]} built in "
-          f"{time.perf_counter() - t0:.1f} s -> {cache}")
-    return atlas, table, metrics
+    vt_glyphs.save(cache, curves, bands, metrics)
+    print(f"vector glyph data: {metrics['n_curves']} curves, {metrics['n_bands']} bands (fullest "
+          f"{metrics['max_band']}), textures {curves.shape[1]}x{curves.shape[0]} and "
+          f"{bands.shape[1]}x{bands.shape[0]}, built in {time.perf_counter() - t0:.1f} s -> {cache}")
+    return curves, bands, metrics
 
 
 # ---------------------------------------------------------------- viewer
@@ -956,8 +958,8 @@ class Viewer:
                     self.tex_line_u, self.tex_file_f, self.tex_file_u, self.tex_dir_f]
         if self.vt is not None:
             import vt_glyphs
-            textures.append(vt_glyphs.make_texture(self.vt[0]))
-            gpu += self.vt[0].nbytes
+            textures += list(vt_glyphs.make_textures(self.vt[0], self.vt[1]))
+            gpu += self.vt[0].nbytes + self.vt[1].nbytes
         self.gpu_bytes = gpu
 
         glEnable(GL_BLEND)
@@ -966,7 +968,7 @@ class Viewer:
         for n, p in self.prog.items():
             glUseProgram(p)
             for i, tex in enumerate(("uChars", "uKinds", "uGlyphs", "uLineF", "uLineU",
-                                     "uFileF", "uFileU", "uDirF", "vt_atlas")):
+                                     "uFileF", "uFileU", "uDirF", "vt_curves", "vt_bands")):
                 loc = glGetUniformLocation(p, tex)
                 if loc >= 0:
                     glUniform1i(loc, i)
@@ -2915,8 +2917,10 @@ def main():
     ap.add_argument("--font", default=atlas_font.DEFAULT_FONT,
                     help="monospace TTF/TTC/OTF for the glyph atlas")
     ap.add_argument("--font-index", type=int, default=0, help="face index in a TTC")
-    ap.add_argument("--vector-text", action="store_true",
-                    help=f"draw glyphs with the vector tier (vt_glyphs.py) from {VT_MIN_PPL:g} device px per line")
+    ap.add_argument("--vector-text", dest="vector_text", action="store_true", default=True,
+                    help=f"draw glyphs with the vector tier (vt_glyphs.py) from {VT_MIN_PPL:g} device px per line (the default)")
+    ap.add_argument("--no-vector-text", dest="vector_text", action="store_false",
+                    help="draw glyphs from the raster atlas at every size")
     ap.add_argument("--frames", type=int, default=None,
                     help="run N scripted frames and exit (self-test)")
     ap.add_argument("--screenshot", default=None, help="save the final frame to this PNG")

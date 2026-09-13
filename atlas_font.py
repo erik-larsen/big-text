@@ -8,21 +8,25 @@ status line use. Each cell is `cell` pixels tall (one line pitch) and
 round(cell * A) wide, where A = advance / (ascent + descent) is the
 character aspect the layout stage also uses.
 
-The line box is the font's OS/2 typographic ascent + descent, widened if
-any ASCII glyph pokes out of it (Menlo's braces do), so nothing is clipped.
-The baseline sits at ascent from the top of the cell.
+The line box is the face's ASCII ink extents: the top of the tallest and
+the bottom of the deepest glyph among 32..126 (Menlo's brace and bar, 1.054
+em; JetBrains Mono's dollar and at sign, 1.050 em), not the OS/2 box, whose
+leading differs wildly between faces (JetBrains Mono's is 1.32 em) and
+would change every proportion with the font. The baseline sits at ascent
+from the top of the cell. Both glyph tiers use this box.
 
     ./atlas_font.py --self-test atlas.png      # writes the PNG, prints metrics
     build_atlas(font_path, index, cell) -> (np.uint8[h, w], metrics)
 """
 import argparse
 import json
+from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from fontTools.ttLib import TTFont
 
-DEFAULT_FONT = "/System/Library/Fonts/Menlo.ttc"
+DEFAULT_FONT = str(Path(__file__).resolve().parent / "fonts" / "JetBrainsMonoNL-Regular.ttf")
 COLS, ROWS_ASCII, FIRST, LAST = 16, 6, 32, 126
 # row 6 of the atlas: symbols the UI uses that are not ASCII. Cell index
 # = 96 + position. Missing glyphs fall back to the ASCII stand-in.
@@ -32,18 +36,16 @@ ROWS = ROWS_ASCII + 1
 
 
 def font_box(font_path, index):
-    """(ascent, descent, advance, units_per_em) in font units, the line box
-    widened to the real extents of the ASCII glyphs."""
+    """(ascent, descent, advance, units_per_em, have) in font units: the line
+    box is the ASCII ink extents (the OS/2 or hhea box only when no glyph has
+    bounds), the advance is M's, `have` the characters the face covers."""
     tt = TTFont(font_path, fontNumber=index)
     upm = tt["head"].unitsPerEm
-    if "OS/2" in tt and tt["OS/2"].sTypoAscender > 0:
-        asc, desc = tt["OS/2"].sTypoAscender, -tt["OS/2"].sTypoDescender
-    else:
-        asc, desc = tt["hhea"].ascent, -tt["hhea"].descent
     cmap = tt.getBestCmap()
     gs = tt.getGlyphSet()
     from fontTools.pens.boundsPen import BoundsPen
     adv = tt["hmtx"][cmap.get(ord("M"), ".notdef")][0]
+    top = bottom = None
     for c in range(FIRST, LAST + 1):
         g = cmap.get(c)
         if g is None:
@@ -51,10 +53,16 @@ def font_box(font_path, index):
         pen = BoundsPen(gs)
         gs[g].draw(pen)
         if pen.bounds:
-            asc = max(asc, int(np.ceil(pen.bounds[3])))
-            desc = max(desc, int(np.ceil(-pen.bounds[1])))
+            t, b = int(np.ceil(pen.bounds[3])), int(np.ceil(-pen.bounds[1]))
+            top = t if top is None else max(top, t)
+            bottom = b if bottom is None else max(bottom, b)
+    if top is None or bottom is None or top + bottom <= 0:
+        if "OS/2" in tt and tt["OS/2"].sTypoAscender > 0:
+            top, bottom = tt["OS/2"].sTypoAscender, -tt["OS/2"].sTypoDescender
+        else:
+            top, bottom = tt["hhea"].ascent, -tt["hhea"].descent
     have = {chr(c) for c in cmap}
-    return asc, desc, adv, upm, have
+    return top, max(bottom, 0), adv, upm, have
 
 
 def build_atlas(font_path=DEFAULT_FONT, index=0, cell=64):
@@ -97,7 +105,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--font", default=DEFAULT_FONT,
-                    help="TTF/TTC/OTF (Linux: /usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf)")
+                    help="TTF/TTC/OTF (default: the bundled JetBrains Mono NL)")
     ap.add_argument("--index", type=int, default=0, help="face index in a TTC")
     ap.add_argument("--cell", type=int, default=64, help="cell height in pixels")
     ap.add_argument("--self-test", metavar="OUT.png", default=None,

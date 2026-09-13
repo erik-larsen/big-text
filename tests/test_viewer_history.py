@@ -50,7 +50,7 @@ def main():
     if atlas_history.load(args.atlas) is None:
         sys.exit(f"error: {args.atlas} has no history.npz; run ./atlas_history.py {args.atlas}")
     ns = argparse.Namespace(atlas=args.atlas, font=av.atlas_font.DEFAULT_FONT, font_index=0,
-                            vector_text=False, frames=None, screenshot=None, goto=None,
+                            vector_text=True, frames=None, screenshot=None, goto=None,
                             zoom=None, filter=None, step=None, shots=None, stats=False,
                             color=None, since=None, history=False, rev=None, compare=None)
     v = av.Viewer(ns)

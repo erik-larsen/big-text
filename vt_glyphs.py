@@ -1,48 +1,58 @@
 #!/usr/bin/env python3
-"""Vector-texture glyph tier (Will Dobbie's "GPU text rendering with vector
-textures"), the optional text rung of big-text above about 40 device pixels
-per line.
+"""Vector glyph tier on the Slug algorithm: the text rung of big-text above
+VT_MIN_PPL device pixels per line, where the raster atlas would be
+magnified.
 
-Builds, for ASCII 32 to 126 of a monospace font, an RGBA8 atlas texture that
-holds each glyph's quadratic bezier outline and a grid of cells listing the
-curves that cross each cell, in Dobbie's format, so that
-shaders/vt_glyph.glsl can compute exact anti-aliased coverage per fragment by
-ray casting, at any magnification.
+Builds, for ASCII 32 to 126 of a monospace face, the two textures the
+shader in shaders/vt_glyph.glsl reads, in the form of Eric Lengyel's
+reference implementation (https://github.com/EricLengyel/Slug, MIT or
+Apache-2.0; the algorithm's patent was dedicated to the public domain on
+2026-03-17):
 
-Coordinates: every glyph lives in the same cell box atlas_font.py uses, the
-advance width by one line pitch (ascent + descent from hhea), baseline at
-ascent from the top, uv (0, 0) top left and (1, 1) bottom right, the same uv
-the raster atlas cell is sampled with. Points are stored as 16-bit fixed point
-over [COORD_OFFSET, COORD_OFFSET + COORD_SCALE] on both axes so glyphs may
-overhang the box a little.
+  curves  float32 [h, 4096, 4]   one texel per quadratic bezier: (p1.x, p1.y,
+                                 p2.x, p2.y); the next texel's xy is p3, which
+                                 for a closed contour is the next curve's p1,
+                                 so a contour of n curves takes n + 1 texels,
+                                 the last holding (p1 of the first curve, 0, 0);
+                                 a contour never straddles a row end
+  bands   uint16  [h, 4096, 2]   row 0 is the directory, four texels per code
+                                 0..127: (glyph block x, y), (vertical bands
+                                 - 1, horizontal bands - 1), (bbox x0, y0),
+                                 (bbox x1, y1), the bbox in 16-bit fixed point
+                                 over [-0.5, 1.5]; codes outside 32..126 point
+                                 at the space glyph. Glyph blocks follow from
+                                 row 1 in one linear address space that wraps
+                                 at 4096 (address a is texel (a & 4095,
+                                 a >> 12)): nh horizontal band headers (curve
+                                 count, offset of the band's list from the
+                                 block start), nv vertical headers, then the
+                                 lists, one texel per curve holding that
+                                 curve's texel (x, y) in `curves`
 
-Atlas layout (width 256 texels, each texel four bytes r g b a):
+Glyph space is the cell box the raster tier uses too: x over the advance, y
+UP from the box bottom (the shader maps the cell's y-down uv onto it), the
+box being the face's ASCII ink extents so both tiers draw a glyph at the
+same size and baseline. Coordinates are float32. A straight segment is
+stored as {p1, p2, p2}, the second endpoint duplicated, as the reference
+recommends.
 
-  row 0            directory: texel (code, 0) = header position (hx, hy) of
-                   ASCII `code` as two ushorts (r g = x, b a = y); codes
-                   outside 32..126 point at the space glyph
-  header (hx, hy)  grid origin (gx, gy) as two ushorts
-  (hx + 1, hy)     grid size (gw, gh) as two ushorts
-  (hx + 2 + i, hy) point i of the glyph as two ushorts; the k-th curve of a
-                   contour uses points at coordIndex 2 + off + 2k, +1, +2 so
-                   consecutive curves share their end points; the contour is
-                   closed by repeating its first point
-  grid             gw by gh texels at (gx, gy): four one-byte coordIndex
-                   values per cell texel, a second texel at (x + gw, y) for
-                   cells with more than four curves; index values below 2 are
-                   empty slots
-  cell flags       Dobbie's trick: byte0 < byte1 means "read the second
-                   texel", byte2 < byte3 means "the cell centre is inside"
+Bands are equal-width over the glyph's ink bounding box; the number per
+axis, 1 to 32, is the one that minimises the fullest band. A curve is in a
+horizontal band when its control points' y range, widened by half the
+largest pixel the tier serves (0.5 / min_ppl) plus 1/1024, overlaps the
+band; vertical bands the same in x. A straight horizontal curve is in no
+horizontal band and a straight vertical curve in no vertical band, since a
+ray parallel to a line never crosses it. Horizontal lists are sorted by the
+curves' maximum x descending, vertical lists by maximum y descending, which
+is what the shader's early exit relies on.
 
 Usage:
-  ./vt_glyphs.py --font /System/Library/Fonts/Menlo.ttc [--index 0] [--grid 12]
-                 [--out data/vt_menlo.npz]
+  ./vt_glyphs.py [--font fonts/JetBrainsMonoNL-Regular.ttf] [--index 0]
+                 [--min-ppl 12] [--out data/vt_<font>.npz]
 
-The npz holds `atlas` (uint8 [h, w, 4]), `glyph_table` (int32 [128, 4] =
-grid_x, grid_y, grid_w, grid_h in texels, indexed by ASCII code), `metrics`
-(float64: char_aspect, ascent, descent, upem, advance) and `params` (int64:
-grid, first, last). Upload the atlas as GL_RGBA8UI (see make_texture) and sample it
-with the usampler2D in shaders/vt_glyph.glsl.
+  build_atlas(font, index, min_ppl, box) -> (curves, bands, metrics)
+  save / load the npz; make_textures(curves, bands) -> (tex_curves, tex_bands)
+  to bind as the sampler2D `vt_curves` and the usampler2D `vt_bands`.
 """
 import argparse
 import os
@@ -51,11 +61,15 @@ from pathlib import Path
 
 import numpy as np
 
-ATLAS_W = 256              # coordIndex is one byte, so a glyph's row is short
-COORD_SCALE = 2.0          # stored 16-bit value v maps to v / 65535 * SCALE + OFFSET
-COORD_OFFSET = -0.5
+HERE = Path(__file__).resolve().parent
+DEFAULT_FONT = str(HERE / "fonts" / "JetBrainsMonoNL-Regular.ttf")
 FIRST, LAST = 32, 126
-MAX_CURVES_PER_CELL = 8    # two texels of four indices
+TEX_W = 4096               # both textures, as in the reference (kLogBandTextureWidth 12)
+LOG_W = 12
+MAX_BANDS = 32             # the ceiling per axis; 16 left the fullest bands longer at large sizes, 64 thrashed the cache
+BAND_EPS = 1.0 / 1024.0    # the reference's band overlap epsilon, in em
+COORD_OFFSET = -0.5        # the directory's bbox fixed point covers [-0.5, 1.5]
+COORD_SCALE = 2.0
 
 
 # ---------------------------------------------------------------- outlines
@@ -63,16 +77,17 @@ MAX_CURVES_PER_CELL = 8    # two texels of four indices
 def font_outlines(font_path, index=0, max_err=0.5, box=None):
     """Quadratic outlines of ASCII 32..126 in font units, plus metrics.
 
-    `box` = (ascent, descent) in font units replaces the hhea line box, so
-    the cell can be made identical to another tier's (the viewer passes
-    atlas_font.font_box's, which is widened to the real glyph extents).
+    `box` = (ascent, descent) in font units is the line box; by default the
+    face's ASCII ink extents from atlas_font.font_box, the same box the
+    raster tier uses, so both tiers draw a glyph at the same size and
+    baseline.
 
     Returns (glyphs, metrics): glyphs[code] is a list of contours, each an
-    array [n, 3, 2] of quadratic beziers (p0, control, p2) that closes on
-    itself; straight segments carry their midpoint as control. Composite
-    glyphs are decomposed, TrueType implied on-curve points are inserted and
-    cubic (CFF) segments are converted with cu2qu within `max_err` units of
-    error on a 1000 unit em."""
+    array [n, 3, 2] of quadratic beziers (p1, control, p2) that closes on
+    itself; straight segments carry their second endpoint as the control.
+    Composite glyphs are decomposed, TrueType implied on-curve points are
+    inserted and cubic (CFF) segments are converted with cu2qu within
+    `max_err` units of error on a 1000 unit em."""
     from fontTools.ttLib import TTFont
     from fontTools.pens.recordingPen import DecomposingRecordingPen
 
@@ -83,8 +98,10 @@ def font_outlines(font_path, index=0, max_err=0.5, box=None):
     if ascent + descent <= 0:
         os2 = font["OS/2"]
         ascent, descent = os2.sTypoAscender, -os2.sTypoDescender
-    if box is not None:
-        ascent, descent = box
+    if box is None:
+        import atlas_font
+        box = atlas_font.font_box(font_path, index)[:2]
+    ascent, descent = box
     cmap = font.getBestCmap()
     glyph_set = font.getGlyphSet()
     hmtx = font["hmtx"]
@@ -109,9 +126,12 @@ def font_outlines(font_path, index=0, max_err=0.5, box=None):
 def contours_from_pen(ops, max_err):
     """Turn recorded pen operations into closed quadratic contours."""
     contours = []
-    cur = []          # list of (p0, c, p2) tuples
+    cur = []          # list of (p1, c, p2) tuples
     start = None
     last = None
+
+    def line(a, b):
+        cur.append((a, b, b))                    # a straight segment: {p1, p2, p2}
 
     def quad_spline(offs, end):
         """qCurveTo semantics: off-curve points with implied on-curve
@@ -119,7 +139,7 @@ def contours_from_pen(ops, max_err):
         nonlocal last
         if not offs:
             if end != last:
-                cur.append((last, mid(last, end), end))
+                line(last, end)
             last = end
             return
         for i, c in enumerate(offs):
@@ -131,7 +151,7 @@ def contours_from_pen(ops, max_err):
         nonlocal cur, start, last
         if cur:
             if last != start:
-                cur.append((last, mid(last, start), start))
+                line(last, start)
             contours.append(np.array(cur, np.float64))
         cur, start, last = [], None, None
 
@@ -142,7 +162,7 @@ def contours_from_pen(ops, max_err):
         elif op == "lineTo":
             p = tuple(args[0])
             if p != last:
-                cur.append((last, mid(last, p), p))
+                line(last, p)
             last = p
         elif op == "qCurveTo":
             pts = [tuple(p) if p is not None else None for p in args]
@@ -174,7 +194,7 @@ def mid(a, b):
 
 
 def signed_area(contours):
-    """Shoelace area over the control polygons (sign is all that is used)."""
+    """Shoelace area over the start points (sign is all that is used)."""
     total = 0.0
     for c in contours:
         pts = c[:, 0, :]
@@ -189,8 +209,8 @@ def quad_roots(p0, p1, p2):
     """t in [0, 1] where the quadratic bezier coordinate hits zero.
 
     Arrays broadcast together; returns [..., 2] with NaN for missing roots.
-    Uses the cancellation-free form so straight segments (control at the
-    midpoint) fall out as one root and one infinity."""
+    Uses the cancellation-free form; a linear coordinate (a = 0) gives one
+    root."""
     a = p0 - 2.0 * p1 + p2
     b = p0 - p1
     d = b * b - a * p0
@@ -236,13 +256,14 @@ def winding(curves, points, signed=True):
 
 
 def orient(contours):
-    """Give every contour the TrueType direction the shader assumes: outer
-    contours clockwise (negative shoelace area, y up), holes counter-clockwise.
-    A contour is a hole when its first point lies inside an odd number of the
-    other contours (even-odd, so mixed input directions do not matter). Fonts
-    mix directions more often than one would think: SF Mono is
-    counter-clockwise except for its mirrored glyphs, CFF fonts are all
-    counter-clockwise."""
+    """Give every contour of a glyph the same convention: outer contours
+    clockwise (negative shoelace area, y up), holes counter-clockwise. The
+    shader's coverage takes an absolute value, so either convention renders,
+    but one glyph must not mix them. A contour is a hole when its first
+    point lies inside an odd number of the other contours (even-odd, so
+    mixed input directions do not matter). Fonts mix directions more often
+    than one would think: SF Mono is counter-clockwise except for its
+    mirrored glyphs, CFF fonts are all counter-clockwise."""
     out = []
     for i, c in enumerate(contours):
         others = [k for j, k in enumerate(contours) if j != i]
@@ -256,266 +277,233 @@ def orient(contours):
     return out
 
 
-def curves_in_rect(curves, x0, y0, x1, y1, eps=1e-9):
-    """Boolean [n]: does each quadratic bezier touch the rectangle?
-    True if an end point is inside or the curve crosses an edge."""
-    n = len(curves)
-    if n == 0:
-        return np.zeros(0, bool)
-    ends = curves[:, [0, 2], :]
-    inside = ((ends[..., 0] >= x0 - eps) & (ends[..., 0] <= x1 + eps)
-              & (ends[..., 1] >= y0 - eps) & (ends[..., 1] <= y1 + eps)).any(axis=1)
-    hit = inside
-    for axis, lo, hi, other_lo, other_hi in ((0, x0, x1, y0, y1), (1, y0, y1, x0, x1)):
-        for edge in (lo, hi):
-            c = curves[:, :, axis] - edge
-            t = quad_roots(c[:, 0], c[:, 1], c[:, 2])       # [n, 2]
-            tf = np.nan_to_num(t, nan=0.0)
-            pos = bezier_at(curves[:, None, :, :], tf)[..., 1 - axis]
-            ok = ~np.isnan(t) & (pos >= other_lo - eps) & (pos <= other_hi + eps)
-            hit = hit | ok.any(axis=1)
-    return hit
-
-
-# ---------------------------------------------------------------- packing
-
-def pack_cell(indices, inside):
-    """Two texels of four bytes for one grid cell.
-
-    `indices` are the coordIndex values (all >= 2, distinct) of the curves
-    that cross the cell. Dobbie's flags: byte0 < byte1 signals a second
-    texel, byte2 < byte3 signals that the cell centre is inside the glyph.
-    Index 1 is an empty slot the shader skips, used to force a flag."""
-    idx = sorted(indices, reverse=True)
-    n = len(idx)
-    if n > MAX_CURVES_PER_CELL:
-        raise ValueError(f"{n} curves in one cell (max {MAX_CURVES_PER_CELL})")
-    t2 = [0, 0, 0, 0]
-    if n == 0:
-        t1 = [0, 0, 0, 1 if inside else 0]
-    elif n == 1:
-        t1 = [idx[0], 0, 0, 1 if inside else 0]
-    elif n == 2:
-        t1 = [idx[0], idx[1], 0, 1 if inside else 0]
-    elif n == 3:
-        t1 = [idx[0], 0, idx[2], idx[1]] if inside else [idx[0], idx[1], idx[2], 0]
-    elif n == 4:
-        t1 = [idx[0], idx[1], idx[3], idx[2]] if inside else idx
-    else:
-        a, b, c, d = idx[3], idx[0], idx[1], idx[2]     # a < b: more than four
-        t1 = [a, b, d, c] if inside else [a, b, c, d]
-        rest = idx[4:]
-        t2 = rest + [0] * (4 - len(rest))
-    assert (t1[0] < t1[1]) == (n > 4) and (t1[2] < t1[3]) == bool(inside), (t1, n, inside)
-    return t1, t2
-
-
-def ushort_texel(x, y):
-    x, y = int(round(x)), int(round(y))
-    assert 0 <= x <= 65535 and 0 <= y <= 65535, (x, y)
-    return [x >> 8, x & 255, y >> 8, y & 255]
-
-
-def quantize(v, even=False):
-    """Cell-box coordinate -> 16-bit fixed point over the COORD range.
-    On-curve points go to even values so a straight segment's midpoint
-    control is exactly representable and the shader's solver sees a = 0."""
-    q = (np.asarray(v, np.float64) - COORD_OFFSET) / COORD_SCALE * 65535.0
-    if even:
-        q = np.round(q / 2.0) * 2.0
-    else:
-        q = np.round(q)
-    return np.clip(q, 0, 65535)
-
-
-def dequantize(q):
-    return np.asarray(q, np.float64) / 65535.0 * COORD_SCALE + COORD_OFFSET
-
+# ---------------------------------------------------------------- glyph space and bands
 
 def normalize_glyph(contours, metrics):
-    """Font units -> cell box uv (x over the advance, y down from ascent),
-    quantized and back so the CPU grid sees exactly the shader's curves.
-    Returns (curves [n, 3, 2] in uv, coord_index [n], points [m, 2] u16)."""
+    """Font units -> glyph space: x over the advance, y up from the box
+    bottom (the baseline sits at descent / (ascent + descent)). Returns a
+    list of contour arrays [n, 3, 2] and the count of control points
+    outside the directory's bbox range."""
     adv = metrics["advance"]
     height = metrics["ascent"] + metrics["descent"]
-    points, coord_index, curves = [], [], []
-    clipped = 0
+    out, clipped = [], 0
+    lo, hi = COORD_OFFSET, COORD_OFFSET + COORD_SCALE
     for c in contours:
-        n = len(c)
         u = c[..., 0] / adv
-        v = (metrics["ascent"] - c[..., 1]) / height
-        uv = np.stack([u, v], axis=-1)                          # [n, 3, 2]
-        lo, hi = COORD_OFFSET, COORD_OFFSET + COORD_SCALE
+        v = (c[..., 1] + metrics["descent"]) / height
+        uv = np.stack([u, v], axis=-1)
         clipped += int(((uv < lo) | (uv > hi)).any(axis=(1, 2)).sum())
-        on = quantize(uv[:, 0, :], even=True)                    # start points
-        ctl = quantize(uv[:, 1, :])
-        end = np.roll(on, -1, axis=0)                            # closed: next start
-        straight = np.all(np.abs(c[:, 1, :] - (c[:, 0, :] + c[:, 2, :]) * 0.5) < 1e-9, axis=1)
-        ctl[straight] = (on[straight] + end[straight]) * 0.5     # exact midpoints
-        base = 2 + len(points)
-        for k in range(n):
-            coord_index.append(base + 2 * k)
-            points.append(on[k])
-            points.append(ctl[k])
-            curves.append(np.stack([on[k], ctl[k], end[k]]))
-        points.append(on[0])                                      # close the contour
-    if curves:
-        curves = dequantize(np.array(curves))
-        points = np.array(points)
-    else:
-        curves = np.zeros((0, 3, 2))
-        points = np.zeros((0, 2))
-    return curves, np.array(coord_index, np.int64), points, clipped
+        out.append(uv)
+    return out, clipped
 
 
-def grid_cells(curves, coord_index, grid):
-    """Per cell (row-major, y down): list of coordIndex values and inside flag."""
-    cells = []
-    overflow = 0
-    centres = np.array([[(i + 0.5) / grid, (j + 0.5) / grid] for j in range(grid) for i in range(grid)])
-    inside = winding(curves, centres) != 0
-    for j in range(grid):
-        for i in range(grid):
-            hit = curves_in_rect(curves, i / grid, j / grid, (i + 1) / grid, (j + 1) / grid, eps=0.5 / 65535)
-            idx = [int(v) for v in coord_index[hit]]
-            overflow = max(overflow, len(idx))
-            cells.append((idx, bool(inside[j * grid + i])))
-    return cells, overflow
+def band_lists(curves, axis, n_bands, lo, hi, widen):
+    """Per band of `n_bands` equal widths over [lo, hi] along `axis` (1 for
+    horizontal bands, 0 for vertical), the indices of the curves whose
+    widened extent along that axis overlaps it, sorted for the shader:
+    horizontal bands by the curves' maximum x descending, vertical by
+    maximum y descending. Curves parallel to the ray (straight along the
+    band axis) are left out."""
+    coord = curves[:, :, axis]
+    cmin, cmax = coord.min(axis=1), coord.max(axis=1)
+    straight = (cmax - cmin) < 1e-9
+    other = curves[:, :, 1 - axis].max(axis=1)
+    edges = lo + (hi - lo) * np.arange(n_bands + 1) / n_bands
+    lists = []
+    for j in range(n_bands):
+        members = np.flatnonzero(~straight & (cmax + widen >= edges[j]) & (cmin - widen <= edges[j + 1]))
+        members = members[np.argsort(-other[members], kind="stable")]
+        lists.append(members)
+    return lists
 
 
-def build(font_path, index=0, grid=12, box=None):
-    """-> (rgba8 atlas uint8 [h, w, 4], glyph_table int32 [128, 4]);
-    glyph_table[code] = (grid_x, grid_y, grid_w, grid_h) in texels."""
-    atlas, glyph_table, _ = build_atlas(font_path, index, grid, box=box)
-    return atlas, glyph_table
+def choose_bands(curves, axis, lo, hi, widen, max_bands=MAX_BANDS):
+    """The band count from 1 to max_bands that minimises the fullest band
+    (the smaller count on a tie), and its lists."""
+    best = None
+    for n in range(1, max_bands + 1):
+        lists = band_lists(curves, axis, n, lo, hi, widen)
+        fullest = max((len(m) for m in lists), default=0)
+        if best is None or fullest < best[0]:
+            best = (fullest, n, lists)
+        if fullest == 0:
+            break
+    return best[1], best[2], best[0]
 
 
-def build_atlas(font_path, index=0, grid=12, verbose=False, box=None):
-    """build() plus the metrics dict (char_aspect, ascent, descent, upem,
-    advance, grid, max_points, max_per_cell, refined) as a third value.
+def quantize(v):
+    q = (np.asarray(v, np.float64) - COORD_OFFSET) / COORD_SCALE * 65535.0
+    return np.clip(np.round(q), 0, 65535).astype(np.int64)
 
-    A glyph whose cells overflow MAX_CURVES_PER_CELL at `grid` gets its own
-    finer grid (2x, then 4x); the atlas stores each glyph's grid size, so the
-    shader does not care. The grid blocks are shelf-packed below the curve rows."""
+
+class Packer:
+    """Texels appended to one linear address space of TEX_W-wide rows."""
+
+    def __init__(self, channels, dtype, start=0):
+        self.channels, self.dtype = channels, dtype
+        self.addr = start
+
+    def reserve(self, n, contiguous=False):
+        """Address of `n` texels; with contiguous=True they do not straddle
+        a row end (the shader reads curve pairs and headers without wrap)."""
+        if contiguous and (self.addr & (TEX_W - 1)) + n > TEX_W:
+            self.addr = (self.addr + TEX_W - 1) & ~(TEX_W - 1)
+        a = self.addr
+        self.addr += n
+        return a
+
+    def array(self):
+        rows = max(-(-self.addr // TEX_W), 1)
+        return np.zeros((rows, TEX_W, self.channels), self.dtype)
+
+
+def build_atlas(font_path=DEFAULT_FONT, index=0, min_ppl=12.0, box=None, verbose=False, max_bands=MAX_BANDS):
+    """-> (curves float32 [h, 4096, 4], bands uint16 [h, 4096, 2], metrics).
+
+    metrics: char_aspect, ascent, descent, upem, advance, min_ppl, n_curves,
+    max_band (the fullest band of any glyph), n_bands (all bands), and the
+    two texture heights."""
     t0 = time.time()
     glyphs, metrics = font_outlines(font_path, index, box=box)
-    for c in glyphs:
-        glyphs[c] = orient(glyphs[c])
+    widen = 0.5 / max(float(min_ppl), 1.0) + BAND_EPS
     n_glyphs = LAST - FIRST + 1
+
+    # pass one: glyph space, curve texels per contour, bands
     per_glyph = []
-    max_points = max_per_cell = refined = 0
-    clipped = 0
+    curve_pack = Packer(4, np.float32)
+    n_curves = clipped = 0
+    max_band = n_bands = 0
     for code in range(FIRST, LAST + 1):
-        curves, coord_index, points, clip = normalize_glyph(glyphs[code], metrics)
+        contours, clip = normalize_glyph(orient(glyphs[code]), metrics)
         clipped += clip
-        if 2 + len(points) > ATLAS_W:
-            raise ValueError(f"glyph {code} ({chr(code)!r}) has {len(points)} points, "
-                             f"more than fit one atlas row of {ATLAS_W}")
-        g = grid
-        while True:
-            cells, per_cell = grid_cells(curves, coord_index, g)
-            if per_cell <= MAX_CURVES_PER_CELL:
-                break
-            if g >= grid * 4 or 4 * g > ATLAS_W:
-                raise ValueError(f"glyph {code} ({chr(code)!r}) has {per_cell} curves in one "
-                                 f"cell at grid {g} (max {MAX_CURVES_PER_CELL})")
-            g *= 2
-        refined += g != grid
-        max_points = max(max_points, len(points))
-        max_per_cell = max(max_per_cell, per_cell)
-        per_glyph.append((points, cells, g))
-    # rows: 0 directory, 1..n_glyphs curves, then the grid blocks (2g wide
-    # for the two index texels, g tall) shelf-packed largest first
-    y0 = 1 + n_glyphs
-    order = sorted(range(n_glyphs), key=lambda i: -per_glyph[i][2])
-    pos = {}
-    x = y = shelf = 0
-    for i in order:
-        g = per_glyph[i][2]
-        if x + 2 * g > ATLAS_W:
-            x, y, shelf = 0, y + shelf, 0
-        pos[i] = (x, y0 + y)
-        x, shelf = x + 2 * g, max(shelf, g)
-    height = y0 + y + shelf
-    atlas = np.zeros((height, ATLAS_W, 4), np.uint8)
-    glyph_table = np.zeros((128, 4), np.int32)
-    for i, (points, cells, g) in enumerate(per_glyph):
+        locs = []                       # (address, contour) per contour
+        for c in contours:
+            a = curve_pack.reserve(len(c) + 1, contiguous=True)
+            locs.append((a, c))
+        curves = np.concatenate(contours) if contours else np.zeros((0, 3, 2))
+        n_curves += len(curves)
+        if len(curves):
+            pts = curves.reshape(-1, 2)
+            bbox = (pts[:, 0].min(), pts[:, 1].min(), pts[:, 0].max(), pts[:, 1].max())
+            nh, hlists, fh = choose_bands(curves, 1, bbox[1], bbox[3], widen, max_bands)
+            nv, vlists, fv = choose_bands(curves, 0, bbox[0], bbox[2], widen, max_bands)
+        else:
+            bbox = (0.0, 0.0, 1.0, 1.0)
+            nh, hlists, fh, nv, vlists, fv = 1, [np.zeros(0, np.int64)], 0, 1, [np.zeros(0, np.int64)], 0
+        max_band = max(max_band, fh, fv)
+        n_bands += nh + nv
+        per_glyph.append((locs, bbox, hlists, vlists))
+
+    # pass two: the band texture, directory first
+    band_pack = Packer(2, np.uint16, start=TEX_W)      # row 0 is the directory
+    blocks = []
+    for locs, bbox, hlists, vlists in per_glyph:
+        nh, nv = len(hlists), len(vlists)
+        total = nh + nv + sum(len(m) for m in hlists) + sum(len(m) for m in vlists)
+        base = band_pack.reserve(nh + nv, contiguous=True)      # headers never wrap
+        band_pack.addr = base + total
+        blocks.append(base)
+    curves_tex = curve_pack.array()
+    bands_tex = band_pack.array()
+
+    def texel(a):
+        return a & (TEX_W - 1), a >> LOG_W
+
+    for i, (locs, bbox, hlists, vlists) in enumerate(per_glyph):
         code = FIRST + i
-        hx, hy = 0, 1 + i
-        gx, gy = pos[i]
-        atlas[0, code] = ushort_texel(hx, hy)
-        atlas[hy, hx] = ushort_texel(gx, gy)
-        atlas[hy, hx + 1] = ushort_texel(g, g)
-        for k, (px, py) in enumerate(points):
-            atlas[hy, hx + 2 + k] = ushort_texel(px, py)
-        for k, (idx, inside) in enumerate(cells):
-            cx, cy = k % g, k // g
-            t1, t2 = pack_cell(idx, inside)
-            atlas[gy + cy, gx + cx] = t1
-            atlas[gy + cy, gx + g + cx] = t2
-        glyph_table[code] = (gx, gy, g, g)
+        curve_xy = []
+        for a, c in locs:
+            for k in range(len(c)):
+                x, y = texel(a + k)
+                curves_tex[y, x, :2] = c[k, 0]
+                curves_tex[y, x, 2:] = c[k, 1]
+                curve_xy.append((x, y))
+            x, y = texel(a + len(c))
+            curves_tex[y, x, :2] = c[0, 0]                     # closing texel: p3 of the last curve
+        curve_xy = np.array(curve_xy, np.int64).reshape(-1, 2)
+        base = blocks[i]
+        nh, nv = len(hlists), len(vlists)
+        off = nh + nv
+        for j, members in enumerate(list(hlists) + list(vlists)):
+            x, y = texel(base + j)
+            bands_tex[y, x] = (len(members), off)
+            for k, m in enumerate(members):
+                mx, my = texel(base + off + k)
+                bands_tex[my, mx] = curve_xy[m]
+            off += len(members)
+        bx, by = texel(base)
+        q = quantize(bbox)
+        bands_tex[0, 4 * code] = (bx, by)
+        bands_tex[0, 4 * code + 1] = (nv - 1, nh - 1)          # bandMax: x counts vertical bands, y horizontal
+        bands_tex[0, 4 * code + 2] = (q[0], q[1])
+        bands_tex[0, 4 * code + 3] = (q[2], q[3])
     for code in list(range(0, FIRST)) + [127]:
-        atlas[0, code] = atlas[0, FIRST]
-        glyph_table[code] = glyph_table[FIRST]
+        bands_tex[0, 4 * code:4 * code + 4] = bands_tex[0, 4 * FIRST:4 * FIRST + 4]
+
+    metrics = dict(metrics, min_ppl=float(min_ppl), n_curves=int(n_curves), max_band=int(max_band),
+                   n_bands=int(n_bands), curve_rows=int(curves_tex.shape[0]), band_rows=int(bands_tex.shape[0]))
     if verbose:
-        print(f"{Path(font_path).name}[{index}] {n_glyphs} glyphs, grid {grid}x{grid}"
-              f"{f' ({refined} refined to a finer grid)' if refined else ''}, "
-              f"atlas {ATLAS_W}x{height} RGBA8 ({atlas.nbytes / 1024:.0f} KB), "
-              f"max {max_points} points per glyph, max {max_per_cell} curves per cell, "
-              f"{clipped} points clipped to the coordinate range, "
+        print(f"{Path(font_path).name}[{index}] {n_glyphs} glyphs, {n_curves} curves in "
+              f"{curves_tex.shape[1]}x{curves_tex.shape[0]} RGBA32F ({curves_tex.nbytes / 1024:.0f} KB), "
+              f"{n_bands} bands (fullest {max_band} curves, widened by {widen:.4f} em for {min_ppl:g} px per line) in "
+              f"{bands_tex.shape[1]}x{bands_tex.shape[0]} RG16UI ({bands_tex.nbytes / 1024:.0f} KB), "
+              f"{clipped} control points outside the bbox range, "
               f"char_aspect {metrics['char_aspect']:.4f}, {time.time() - t0:.2f} s")
-    metrics = dict(metrics, grid=grid, max_points=max_points, max_per_cell=max_per_cell, refined=refined)
-    return atlas, glyph_table, metrics
+    return curves_tex, bands_tex, metrics
 
 
-def save(path, atlas, glyph_table, metrics):
-    np.savez(path, atlas=atlas, glyph_table=glyph_table,
+def save(path, curves, bands, metrics):
+    np.savez(path, curves=curves, bands=bands,
              metrics=np.array([metrics["char_aspect"], metrics["ascent"], metrics["descent"], metrics["upem"],
-                               metrics["advance"]], np.float64),
-             params=np.array([metrics["grid"], FIRST, LAST], np.int64))
+                               metrics["advance"], metrics["min_ppl"]], np.float64),
+             params=np.array([metrics["n_curves"], metrics["max_band"], metrics["n_bands"], FIRST, LAST], np.int64))
 
 
 def load(path):
-    """-> (atlas, glyph_table, metrics dict)"""
+    """-> (curves, bands, metrics dict)"""
     z = np.load(path)
-    m = z["metrics"]
-    p = z["params"]
-    metrics = {"char_aspect": float(m[0]), "ascent": float(m[1]), "descent": float(m[2]),
-               "upem": float(m[3]), "advance": float(m[4]), "grid": int(p[0]), "first": int(p[1]), "last": int(p[2])}
-    return z["atlas"], z["glyph_table"], metrics
+    m, p = z["metrics"], z["params"]
+    metrics = {"char_aspect": float(m[0]), "ascent": float(m[1]), "descent": float(m[2]), "upem": float(m[3]),
+               "advance": float(m[4]), "min_ppl": float(m[5]), "n_curves": int(p[0]), "max_band": int(p[1]),
+               "n_bands": int(p[2]), "first": int(p[3]), "last": int(p[4])}
+    return z["curves"], z["bands"], metrics
 
 
-def make_texture(atlas):
-    """Upload the atlas as a GL_RGBA8UI texture (nearest, no mipmaps) and
-    return the texture id; bind it to the usampler2D `vt_atlas`."""
+def make_textures(curves, bands):
+    """Upload the two textures (nearest, no mipmaps) and return their ids;
+    bind them to the sampler2D `vt_curves` and the usampler2D `vt_bands`."""
     from OpenGL.GL import (glGenTextures, glBindTexture, glTexParameteri, glTexImage2D, glPixelStorei,
                            GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_TEXTURE_MAG_FILTER, GL_NEAREST,
-                           GL_TEXTURE_WRAP_S, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE, GL_RGBA8UI,
-                           GL_RGBA_INTEGER, GL_UNSIGNED_BYTE, GL_UNPACK_ALIGNMENT)
-    tex = glGenTextures(1)
-    glBindTexture(GL_TEXTURE_2D, tex)
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
-    h, w = atlas.shape[:2]
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8UI, w, h, 0, GL_RGBA_INTEGER, GL_UNSIGNED_BYTE,
-                 np.ascontiguousarray(atlas, np.uint8))
-    return tex
+                           GL_TEXTURE_WRAP_S, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE, GL_RGBA32F, GL_RGBA, GL_FLOAT,
+                           GL_RG16UI, GL_RG_INTEGER, GL_UNSIGNED_SHORT, GL_UNPACK_ALIGNMENT)
+    ids = []
+    for buf, internal, fmt, typ in ((np.ascontiguousarray(curves, np.float32), GL_RGBA32F, GL_RGBA, GL_FLOAT),
+                                    (np.ascontiguousarray(bands, np.uint16), GL_RG16UI, GL_RG_INTEGER, GL_UNSIGNED_SHORT)):
+        tex = glGenTextures(1)
+        glBindTexture(GL_TEXTURE_2D, tex)
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
+        h, w = buf.shape[:2]
+        glTexImage2D(GL_TEXTURE_2D, 0, internal, w, h, 0, fmt, typ, buf)
+        ids.append(tex)
+    return ids[0], ids[1]
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--font", default="/System/Library/Fonts/Menlo.ttc", help="TTF/TTC/OTF path")
+    ap.add_argument("--font", default=DEFAULT_FONT, help="TTF/TTC/OTF path (default: the bundled JetBrains Mono NL)")
     ap.add_argument("--index", type=int, default=0, help="face index in a collection")
-    ap.add_argument("--grid", type=int, default=12, help="cells per glyph box side")
+    ap.add_argument("--min-ppl", type=float, default=12.0,
+                    help="the smallest device pixels per line the tier serves; bands are widened for it")
     ap.add_argument("--out", default=None, help="output npz (default data/vt_<font>.npz)")
     args = ap.parse_args()
     out = args.out or os.path.join("data", f"vt_{Path(args.font).stem.lower()}.npz")
-    atlas, table, metrics = build_atlas(args.font, args.index, args.grid, verbose=True)
+    curves, bands, metrics = build_atlas(args.font, args.index, args.min_ppl, verbose=True)
     Path(out).parent.mkdir(parents=True, exist_ok=True)
-    save(out, atlas, table, metrics)
+    save(out, curves, bands, metrics)
     print(f"wrote {out}")
 
 

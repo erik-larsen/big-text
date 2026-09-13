@@ -36,7 +36,7 @@ def main():
     ap.add_argument("atlas", nargs="?", default="data/synthetic_atlas")
     args = ap.parse_args()
     ns = argparse.Namespace(atlas=args.atlas, font=av.atlas_font.DEFAULT_FONT, font_index=0,
-                            vector_text=False, frames=1, screenshot=None, goto=None,
+                            vector_text=True, frames=1, screenshot=None, goto=None,
                             zoom=None, filter=None, step=None, shots=None, stats=False)
     v = av.Viewer(ns)
     v.scripted = False                 # take input from the calls below

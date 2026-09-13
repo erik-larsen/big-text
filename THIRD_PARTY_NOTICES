@@ -1,0 +1,9 @@
+Third-party material in big-text and how it is used. big-text itself is MIT (LICENSE).
+
+Slug reference shaders. shaders/vt_glyph.glsl is a GLSL translation of SlugRender and its helpers from https://github.com/EricLengyel/Slug, "Reference code for the Slug Algorithm", Copyright 2017, by Eric Lengyel, SPDX-License-Identifier: MIT OR Apache-2.0. The repository's README states: "The code in this repository may be freely used by anyone for any purpose. The patent has been dedicated to the public domain. If you do use this code in software that gets distributed in any way, then you are required to give credit." The algorithm is described in E. Lengyel, "GPU-Centered Font Rendering Directly from Glyph Outlines", Journal of Computer Graphics Techniques 6(2), 2017. US patent 10,373,352 was dedicated to the public domain on 2026-03-17.
+
+JetBrains Mono. fonts/JetBrainsMonoNL-Regular.ttf is JetBrains Mono 2.304, the no-ligatures face, Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono), licensed under the SIL Open Font License, Version 1.1 (fonts/OFL.txt, authors in fonts/AUTHORS.txt). The glyph atlases the viewer builds from it at run time are embeddings in the OFL's sense.
+
+Will Dobbie's GPU text demos. Nothing of them is included. The technique, the atlas format and the two-tier design are described in his posts (https://wdobbie.com/post/gpu-text-rendering-with-vector-textures/, https://wdobbie.com/post/war-and-peace-and-webgl/) and are reimplemented here; the demo files themselves, which carry no licence, are downloaded by dobbie/fetch.sh for study and parity testing only and are never committed.
+
+Submodules. big-picture and dagcmp (Erik Larsen, MIT), makepad (MIT or Apache-2.0), HEPR (soadzoor, MIT) are pinned as git submodules and carry their own licence files; big-text reads them as corpora and references and does not copy their code.

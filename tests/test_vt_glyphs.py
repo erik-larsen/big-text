@@ -7,7 +7,7 @@ renderings as PNGs, and compares the 96 pixel one against Pillow's FreeType
 rasterisation of the same string, font and cell size. Prints the mean
 absolute coverage difference; passes (exit 0) when it is below 0.06.
 
-  ./tests/test_vt_glyphs.py [--font Menlo.ttc] [--index 0] [--grid 12] [--out data/vt_test]
+  ./tests/test_vt_glyphs.py [--font fonts/JetBrainsMonoNL-Regular.ttf] [--index 0] [--min-ppl 12] [--out data/vt_test]
 """
 import argparse
 import ctypes
@@ -103,7 +103,9 @@ def render_gl(prog, vao, vbo, atlas_tex, text, pitch, char_aspect):
 
     glUseProgram(prog)
     glActiveTexture(GL_TEXTURE0)
-    glBindTexture(GL_TEXTURE_2D, atlas_tex)      # the FBO texture above took unit 0
+    glBindTexture(GL_TEXTURE_2D, atlas_tex[0])   # the FBO texture above took unit 0
+    glActiveTexture(GL_TEXTURE1)
+    glBindTexture(GL_TEXTURE_2D, atlas_tex[1])
     glUniform2f(glGetUniformLocation(prog, "uSize"), w, h)
     glBindVertexArray(vao)
     glBindBuffer(GL_ARRAY_BUFFER, vbo)
@@ -136,15 +138,15 @@ def render_pillow(font_path, index, metrics, text, pitch):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--font", default="/System/Library/Fonts/Menlo.ttc")
+    ap.add_argument("--font", default=vt_glyphs.DEFAULT_FONT)
     ap.add_argument("--index", type=int, default=0)
-    ap.add_argument("--grid", type=int, default=12)
+    ap.add_argument("--min-ppl", type=float, default=12.0)
     ap.add_argument("--out", default="data/vt_test", help="directory for the PNGs")
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
-    atlas, table, metrics = vt_glyphs.build_atlas(args.font, args.index, args.grid, verbose=True)
+    curves, bands, metrics = vt_glyphs.build_atlas(args.font, args.index, args.min_ppl, verbose=True)
 
     if not glfw.init():
         raise RuntimeError("glfw.init failed")
@@ -160,11 +162,14 @@ def main():
 
     glsl = (Path(__file__).resolve().parent.parent / "shaders" / "vt_glyph.glsl").read_text()
     prog = compile_program(VERT, FRAG_HEAD + glsl + FRAG_MAIN)
-    tex = vt_glyphs.make_texture(atlas)
+    tex = vt_glyphs.make_textures(curves, bands)
     glUseProgram(prog)
     glActiveTexture(GL_TEXTURE0)
-    glBindTexture(GL_TEXTURE_2D, tex)
-    glUniform1i(glGetUniformLocation(prog, "vt_atlas"), 0)
+    glBindTexture(GL_TEXTURE_2D, tex[0])
+    glActiveTexture(GL_TEXTURE1)
+    glBindTexture(GL_TEXTURE_2D, tex[1])
+    glUniform1i(glGetUniformLocation(prog, "vt_curves"), 0)
+    glUniform1i(glGetUniformLocation(prog, "vt_bands"), 1)
 
     vao = glGenVertexArrays(1)
     glBindVertexArray(vao)

@@ -480,7 +480,7 @@ def default_char_aspect():
         import atlas_font
         asc, desc, adv, _, _ = atlas_font.font_box(atlas_font.DEFAULT_FONT, 0)
         return adv / (asc + desc)
-    except Exception as e:                # no Menlo (Linux): the spec's default
+    except Exception as e:                # the bundled font is missing: the spec's default
         print(f"char aspect: atlas_font metrics unavailable ({e}); using 0.6")
         return 0.6
 
@@ -617,7 +617,7 @@ def main():
                          "with cycles grouped (needs resolve.npz); all (default) writes both")
     ap.add_argument("--char-aspect", type=float, default=None,
                     help="character advance / line pitch of the font (default: atlas_font.py's "
-                         "metric for its default font, Menlo 0.569; 0.6 if that font is missing)")
+                         "metric for the bundled font, JetBrains Mono NL 0.571; 0.6 if it is missing)")
     ap.add_argument("--preview", default=None, metavar="PNG",
                     help="render the tokens layout with Pillow at 2400 px wide")
     ap.add_argument("--preview-width", type=int, default=2400,

@@ -21,8 +21,9 @@ Regenerate everything with:
 ./atlas_viewer.py data/makepad-draw_atlas --hover platform/src/os/linux/x11/x11_sys.rs:8:12 --frames 2 --screenshot docs/shots/makepad-draw/hover_symbol.png
 ./atlas_viewer.py data/makepad-draw_atlas --compare '~100' --history --select platform/src/os/linux/vulkan.rs --frames 1 --screenshot docs/shots/makepad-draw/history_file.png
 ./atlas_viewer.py data/big-picture_atlas --goto c/stb_image.h:120 --zoom 14 --frames 2 --screenshot docs/shots/big-picture/wrapped.png
-./atlas_viewer.py data/big-picture_atlas --goto vt_viewer.py:569 --zoom 120 --frames 3 --screenshot docs/shots/big-picture/text_120_raster.png
-./atlas_viewer.py data/big-picture_atlas --goto vt_viewer.py:569 --zoom 120 --frames 3 --screenshot docs/shots/big-picture/text_120_vector.png --vector-text
+./atlas_viewer.py data/big-picture_atlas --goto vt_viewer.py:569 --zoom 120 --frames 3 --screenshot docs/shots/big-picture/text_120_raster.png --no-vector-text
+./atlas_viewer.py data/big-picture_atlas --goto vt_viewer.py:569 --zoom 120 --frames 3 --screenshot docs/shots/big-picture/text_120_vector.png
+./tests/bench_vt.py --out /tmp/bench && cp /tmp/bench/stack_12.png docs/shots/vt_bench_12.png && cp /tmp/bench/stack_96.png docs/shots/vt_bench_96.png
 ```
 
 "N px per line" below means N device pixels per line for the file under the view centre (`c/vt_core.c` in big-picture, `platform/src/draw_shader.rs` in makepad-draw); files with a larger or smaller pitch sit on other rungs in the same frame, which is the per-file ladder at work.
@@ -37,13 +38,14 @@ Regenerate everything with:
 - `big-picture/overview.png`: the map fitted to the window: the `c/` band and label, root-level files as bordered rectangles, `stb_image.h` wrapped into 12 columns; at this size most files sit on the line-bars rung and the smallest ones already show text.
 - `big-picture/bars.png`: 2 px per line: the grey line-bars rung, the circuit-board texture of the video.
 - `big-picture/tokens.png`: 4.5 px per line: one coloured block per token (keywords blue, types yellow, strings pink, comments green) and item outlines in the item-kind colour.
-- `big-picture/text.png`: 16 px per line: legible syntax-coloured Menlo text from the raster glyph atlas, function outlines still drawn.
+- `big-picture/text.png`: 16 px per line: legible syntax-coloured JetBrains Mono text from the vector tier (the default from 12 px per line), function outlines still drawn.
 - `big-picture/hover.png`: the text view with the cursor at the window centre: the hovered file gets the light fill and the label `c/vt_core.c:26 function smoothstep01` (path, line, enclosing item).
 - `big-picture/filter.png`: the fitted map with the filter `Viewer` applied: the one hit file outlined in yellow, every other file dimmed, the results panel listing 1 definition (`class Viewer`, tagged `class`) and 1 reference, the status line reading `1 definitions · 1 references · 1 files · 0/2`.
 - `big-picture/result.png`: after stepping to result 1: the fly-to landed on `class Viewer:` in `vt_viewer.py` at the text rung with the hit box filled yellow, the file's 3 px yellow border, the current row highlighted in the panel and the counter at `1/2`.
 - `big-picture/wrapped.png`: `--goto c/stb_image.h:120 --zoom 14`: the credits block's long lines wrapped inside their column, continuation rows hanging in by two characters.
-- `big-picture/text_120_raster.png`: `vt_viewer.py:569` at 120 px per line drawn from the 64 px raster atlas: the magnified glyphs are visibly soft.
-- `big-picture/text_120_vector.png`: the same view with `--vector-text`: above 40 px per line the glyphs come from the Dobbie vector-texture tier and are crisp at any magnification.
+- `big-picture/text_120_raster.png`: `vt_viewer.py:569` at 120 px per line with `--no-vector-text`, drawn from the 64 px raster atlas: the magnified glyphs are visibly soft.
+- `big-picture/text_120_vector.png`: the same view with the default vector tier: the glyphs are crisp at any magnification.
+- `vt_bench_12.png`, `vt_bench_96.png`: `tests/bench_vt.py --out` evidence: the same string at 12 and 96 px per line rendered by the Slug tier, the old grid tier (from git), the raster tier and the exact coverage, stacked in that order and enlarged.
 
 ## makepad-draw (493 files, 280,607 lines, 10,182,050 chars)
 
