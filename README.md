@@ -8,7 +8,7 @@ View millions of lines of source code, or a whole book, as one continuous surfac
 ![War and Peace flyover: one flat sheet of pages, the near ones as text, the far rows as line bars, the Books as coloured bands](docs/shots/war-and-peace/hero.png)
 *Book viewer of Tolstoy's War and Peace*
 
-This project keeps the camera, view culling, and zoom level of detail of [big-picture](https://github.com/erik-larsen/big-picture), though not its streaming nor tile image pyramid for lod.  Instead the entire data set is kept on the GPU, and the tiled image pyramid is replaced with this lod system:
+This project is similar to [big-picture](https://github.com/erik-larsen/big-picture), though for viewing massive text collections rather than massive image collections.  This project has similar viewing tools and performance optimizations as big-picture to maintain smooth continuous zooming and panning though it replaces streaming on demand with loading all of the data into memory, and uses an alternate LOD system to big-picture's tiled image pyramid:
 
 1. Solid rectangles for code files and book pages when farthest away
 2. One bar per line of text when closer
