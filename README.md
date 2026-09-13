@@ -1,8 +1,12 @@
 # big-text
 
-Draft. This README is the design document; nothing here is settled until we have gone through it together.
-
 big-text is the text-scale sibling of [big-picture](https://github.com/erik-larsen/big-picture): view millions of lines of source code, or a whole book, as one continuous surface. Zoom out and a codebase looks like a circuit board; zoom in and every glyph is crisp. No page turns, no mode switches, one camera.
+
+![makepad's drawing and platform crates in 3D, the churn lens colouring the most edited files ember, the revision rail along the bottom](docs/shots/hero.png)
+
+*makepad's drawing and platform crates, 493 files and 280,607 lines, tilted into 3D with the churn lens: the most edited files glow ember, every roof carries its code at the rung its size allows, and the rail along the bottom is the repository's 689 commits.*
+
+This README is also the design document: the decisions, their reasons and the open questions live here rather than in a wiki, and the sections after the screenshots are written for someone deciding whether to build on this.
 
 It shows three kinds of content, in this order of priority: text, images, 2D vector work. Each has an open-source lineage that big-text builds on, and the ladder that ties them together has a fourth:
 

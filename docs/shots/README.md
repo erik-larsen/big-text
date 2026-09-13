@@ -24,9 +24,14 @@ Regenerate everything with:
 ./atlas_viewer.py data/big-picture_atlas --goto vt_viewer.py:569 --zoom 120 --frames 3 --screenshot docs/shots/big-picture/text_120_raster.png --no-vector-text
 ./atlas_viewer.py data/big-picture_atlas --goto vt_viewer.py:569 --zoom 120 --frames 3 --screenshot docs/shots/big-picture/text_120_vector.png
 ./tests/bench_vt.py --out /tmp/bench && cp /tmp/bench/stack_12.png docs/shots/vt_bench_12.png && cp /tmp/bench/stack_96.png docs/shots/vt_bench_96.png
+./atlas_viewer.py data/makepad-draw_atlas --proj 3d --tilt 55 --yaw 12 --color churn --history --goto platform/src/window.rs:1173 --zoom 2.2 --frames 2 --screenshot docs/shots/hero.png
 ```
 
 "N px per line" below means N device pixels per line for the file under the view centre (`c/vt_core.c` in big-picture, `platform/src/draw_shader.rs` in makepad-draw); files with a larger or smaller pitch sit on other rungs in the same frame, which is the per-file ladder at work.
+
+## The README's opening image
+
+- `hero.png`: makepad-draw in 3D at tilt 55 and yaw 12, 2.2 px per line about `platform/src/window.rs`, the churn lens on and the revision rail shown: the near roofs at the tokens and text rungs, the far ones at bars, the most edited files ember.
 
 ## Layout previews
 
