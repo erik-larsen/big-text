@@ -69,7 +69,7 @@ The whole tree as git tracks it, test suites and system libraries included, at t
 
 ## War and Peace (Project Gutenberg 2600: 18 parts, 366 chapters, 1,401 pages, 63,191 lines, 2.63 million glyphs)
 
-The standard set with `--filter Natasha` (1,213 hits on 299 pages), a book having no tint, plus:
+In the book's own scheme, Dobbie's: white pages and black text on his demo's blue-grey ground. The standard set with `--filter Natasha` (1,213 hits on 299 pages), a book having no tint, plus:
 
 - `war-and-peace/overview.png`: the map fitted: `Front Matter` on top, then the 15 Books and two epilogues as bands of whole page rows in reading order, each labelled, each page a cell at the line-bars rung, the last row of every Book short.
 - `war-and-peace/hover.png`: the text view hovered at the centre: the label `Book Eight: 1811 - 12/Chapter IX/p. 657` (part, chapter, page; a book has no items).

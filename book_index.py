@@ -39,6 +39,12 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from atlas_index import (SPECS, MAX_COLS, TAB, PUNCT, SPACE, _CTRL, tokenize, write_index)  # noqa: E402
 
+# the book's colours, Dobbie's: white pages on his demo's blue-grey ground
+# (its clearColor), black text, dark grey bars; words and numbers alike
+SCHEME = {"ground": "a0a9af", "page": "ffffff", "bar": "5a5e66",
+          "kinds": ["000000", "141414", "141414", "141414", "141414", "3a3a3a", "141414", "4a4a4a", "141414", "141414"],
+          "items": ["7aa2f7", "e0c080", "d7a0a8", "5fb7b7", "8c909a"]}
+
 PART_RX = re.compile(r"^(?:(?:BOOK|PART|VOLUME)\s+[A-Z0-9]+\b|(?:FIRST|SECOND|THIRD)\s+EPILOGUE\b"
                      r"|EPILOGUE\b|PROLOGUE\b)(?P<rest>.*)$")
 CHAPTER_RX = re.compile(r"^CHAPTER\s+[IVXLCDM0-9]+\.?\s*$")
@@ -247,7 +253,7 @@ def main():
     seconds = round(time.time() - t0, 2)
     stats = write_index(args.out, args.name, os.path.abspath(args.text), dirs, files, file_dir,
                         results, skipped, seconds,
-                        extra={"corpus": "book", "page_lines": args.page_lines})
+                        extra={"corpus": "book", "page_lines": args.page_lines, "scheme": SCHEME})
     n_chapters = sum(len(c) for _, c in parts)
     print(f"wrote {args.out}/index.npz + index.json: {len(parts)} parts, {n_chapters} chapters, "
           f"{stats['files']} pages, {stats['lines']} lines, {stats['chars'] / 1e6:.2f} M chars "

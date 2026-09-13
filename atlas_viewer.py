@@ -69,15 +69,13 @@ def rgb(h):
     return np.array([int(h[i:i + 2], 16) / 255.0 for i in (0, 2, 4)], np.float32)
 
 
-BG = rgb("1c1c1e")
-KIND_COLORS = np.array([rgb("000000"), rgb("cfd2d8"), rgb("7aa2f7"), rgb("e0c080"),
-                        rgb("d7a0a8"), rgb("7f9f7f"), rgb("f0a060"), rgb("8c909a"),
-                        rgb("7fc8c8"), rgb("c8d08c")], np.float32)
+# the default scheme, the code atlas's: an index.json "scheme" overrides any key
+SCHEME = {"ground": "1c1c1e", "page": "111114", "bar": "a4a8b0",
+          "kinds": ["000000", "cfd2d8", "7aa2f7", "e0c080", "d7a0a8", "7f9f7f", "f0a060", "8c909a", "7fc8c8", "c8d08c"],
+          "items": ["7aa2f7", "e0c080", "d7a0a8", "5fb7b7", "8c909a"]}
 HUES = np.array([rgb(h) for h in ("6a8fd8", "4fb3a6", "7fbf6a", "e08a4a", "d8c050",
                                   "a57fd0", "a8865a", "d878a8", "60b8e0", "b0c860",
                                   "d86868", "9090d8")], np.float32)
-ITEM_COLORS = {1: rgb("7aa2f7"), 2: rgb("e0c080"), 3: rgb("d7a0a8"),
-               4: rgb("5fb7b7"), 5: rgb("8c909a")}
 ITEM_KW_RX = re.compile(r"\b(fn|struct|enum|trait|impl|mod|macro_rules|type|const|static|union|def|class|function|interface|namespace)\b")
 ITEM_NAMES = {"rust": ["fn", "struct", "enum", "impl", "mod"],
               "python": ["def", "class", "enum", "impl", "mod"],
@@ -274,6 +272,15 @@ class Viewer:
         self.scripted = args.frames is not None or args.shots or args.stats
         t0 = time.perf_counter()
         self.a = a = load_atlas(args.atlas)
+        # the scheme: the adapter's colours and face, over the code atlas's defaults
+        sc = dict(SCHEME, **a["index"].get("scheme", {}))
+        self.bg = rgb(sc["ground"].lstrip("#"))
+        self.page = rgb(sc["page"].lstrip("#"))
+        self.bar = rgb(sc["bar"].lstrip("#"))
+        self.kind_colors = np.array([rgb(h.lstrip("#")) for h in sc["kinds"]], np.float32)
+        self.item_colors = {k + 1: rgb(h.lstrip("#")) for k, h in enumerate(sc["items"])}
+        if sc.get("font") and args.font == atlas_font.DEFAULT_FONT:
+            args.font = str(HERE / sc["font"])
         # the tint: a number in 0..1 per file and a label, when the index has them
         self.tint = a.get("file_tint")
         self.tint_label = a["index"].get("tint") if self.tint is not None else None
@@ -538,7 +545,11 @@ class Viewer:
                 glUniform3fv(loc, 12, HUES)
             loc = glGetUniformLocation(p, "uKindColor")
             if loc >= 0:
-                glUniform3fv(loc, 10, KIND_COLORS)
+                glUniform3fv(loc, 10, self.kind_colors)
+            for name, col in (("uPage", self.page), ("uGround", self.bg), ("uBar", self.bar)):
+                loc = glGetUniformLocation(p, name)
+                if loc >= 0:
+                    glUniform3f(loc, *col)
             loc = glGetUniformLocation(p, "uGlyph")
             if loc >= 0:
                 glUniform4f(loc, self.gm["cell_w"], self.gm["cell_h"],
@@ -1560,9 +1571,9 @@ class Viewer:
         kinds = a["item_kind"][a["item_rect_item"][m]]
         inst = np.zeros((len(rects), 11), np.float32)
         inst[:, :4] = rects
-        for k, c in ITEM_COLORS.items():
+        for k, c in self.item_colors.items():
             inst[kinds == k, 4:7] = c
-        inst[(kinds < 1) | (kinds > 5), 4:7] = ITEM_COLORS[5]
+        inst[(kinds < 1) | (kinds > 5), 4:7] = self.item_colors[5]
         inst[:, 7] = 1.0
         inst[:, 8] = 0.0
         inst[:, 9] = 0.18
@@ -1578,9 +1589,9 @@ class Viewer:
         kinds = a["item_kind"][a["item_rect_item"][m]]
         inst = np.zeros((len(rects), 11), np.float32)
         inst[:, :4] = rects
-        for k, c in ITEM_COLORS.items():
+        for k, c in self.item_colors.items():
             inst[kinds == k, 4:7] = c
-        inst[(kinds < 1) | (kinds > 5), 4:7] = ITEM_COLORS[5]
+        inst[(kinds < 1) | (kinds > 5), 4:7] = self.item_colors[5]
         inst[:, 7] = 0.6
         inst[:, 8] = 1.5
         inst[:, 10] = self.file_top[self.item_rect_file[m]] + 0.06
@@ -1809,7 +1820,7 @@ class Viewer:
     def render(self):
         self.update_sizes()
         glViewport(0, 0, self.fb_w, self.fb_h)
-        glClearColor(BG[0], BG[1], BG[2], 1.0)
+        glClearColor(self.bg[0], self.bg[1], self.bg[2], 1.0)
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         self.update_per_file()
         # the map in its own viewport, the window minus the panel column

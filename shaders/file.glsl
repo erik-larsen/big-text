@@ -61,10 +61,9 @@ flat in vec3 vTile;
 flat in int vRing;
 flat in float vTint;
 uniform int uTint;
+uniform vec3 uPage;         // the file fill, the scheme's page colour
 out vec4 frag;
 
-const vec3 BG     = vec3(0x1c, 0x1c, 0x1e) / 255.0;
-const vec3 FILEBG = vec3(0x11, 0x11, 0x14) / 255.0;
 const vec3 GREY   = vec3(0x8a, 0x8f, 0x9a) / 255.0;
 const vec3 YELLOW = vec3(0xe8, 0xd4, 0x4d) / 255.0;
 const vec3 HOVER  = vec3(0xdf, 0xe3, 0xec) / 255.0;
@@ -76,7 +75,7 @@ void main() {
     bool current = (flags & 4) != 0, dimmed = (flags & 8) != 0;
     // every rung shares the file background: the hue lives in the directory
     // bands only, so the rung 0/1 cut does not flip a file's colour
-    vec3 col = FILEBG;
+    vec3 col = uPage;
     // the tint colours the fill only; bands, bars and glyphs stay
     if (uTint == 1) col = mix(col, EMBER, 0.65 * vTint);
     if (dimmed) col *= 0.5;

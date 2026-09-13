@@ -42,13 +42,12 @@ void main() {
 #version 330 core
 uniform float uZScale;
 uniform float uBandPx;     // the band's greatest width in device pixels
+uniform vec3 uGround;      // the scheme's ground colour, under the terrace tint
 in vec2 vWorld;
 flat in vec4 vRect;
 flat in float vPad;
 flat in vec3 vColor;
 out vec4 frag;
-
-const vec3 BG = vec3(0x1c, 0x1c, 0x1e) / 255.0;
 
 void main() {
     float d = min(min(vWorld.x - vRect.x, vRect.z - vWorld.x),
@@ -56,6 +55,6 @@ void main() {
     float px = fwidth(vWorld.x);           // world units per device pixel
     float ring = min(max(vPad, px), uBandPx * px);   // one pixel at least, uBandPx at most
     if (d < ring) frag = vec4(vColor, uZScale > 0.0 ? 1.0 : 0.55);
-    else          frag = uZScale > 0.0 ? vec4(mix(BG, vColor, 0.16), 1.0)
+    else          frag = uZScale > 0.0 ? vec4(mix(uGround, vColor, 0.16), 1.0)
                                        : vec4(vColor * 0.6, 0.16);
 }

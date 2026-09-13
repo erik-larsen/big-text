@@ -76,7 +76,7 @@ flat in ivec4 vMeta;
 flat in float vPpl;
 out vec4 frag;
 
-const vec3 BAR = vec3(0xa4, 0xa8, 0xb0) / 255.0;
+uniform vec3 uBar;          // the line bar colour, from the scheme
 
 ivec2 tcc(uint o) { return ivec2(int(o & 16383u), int(o >> 14)); }
 
@@ -98,12 +98,12 @@ void main() {
     float bara = clamp(0.5 + 0.15 * vPpl, 0.55, 0.8);
     if (rung == 0) {                        // a sampled line: one pixel row
         if (col < indent) discard;
-        frag = vec4(BAR * dim, bara);
+        frag = vec4(uBar * dim, bara);
         return;
     }
     if (rung == 1) {
         if (col < indent || vUV.y > barf) discard;
-        frag = vec4(BAR * dim, bara);
+        frag = vec4(uBar * dim, bara);
         return;
     }
     uint o = vOff.x + uint(col);            // hi word is zero below 4 GB
