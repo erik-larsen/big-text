@@ -1,7 +1,3 @@
-# Will Dobbie's demos: never committed, fetched by dobbie/fetch.sh and verified by checksum
-dobbie/pdf/
-dobbie/warandpeace/
-
 # generated atlases (atlas_index.py, atlas_layout.py) and glyph data
 data/
 
