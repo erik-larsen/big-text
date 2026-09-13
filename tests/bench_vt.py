@@ -79,7 +79,7 @@ uniform sampler2D uGlyphs;
 uniform vec4 uGlyph;        // cell_w, cell_h, atlas_w, atlas_h (pixels)
 float vt_coverage(int code, vec2 uv, vec2 gdx, vec2 gdy) {
     int g = code - 32;
-    if (g < 0 || g > 94) g = 31;
+    if (g < 0 || g > 223) g = 31;
     vec2 cell = vec2(g & 15, g >> 4);
     vec2 scale = uGlyph.xy / uGlyph.zw;
     return textureGrad(uGlyphs, (cell + uv) * scale, gdx * scale, gdy * scale).r;

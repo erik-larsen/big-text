@@ -29,7 +29,7 @@
 // Provides
 //   float vt_coverage(int code, vec2 uv)
 //   float vt_coverage(int code, vec2 uv, vec2 duvdx, vec2 duvdy)
-// code is the ASCII code (32..126; others draw as space), uv is the position
+// code is the byte of Windows-1252 (32..255; others draw as space), uv is the position
 // in the glyph's cell box, (0,0) top left, (1,1) bottom right, the same uv
 // the raster atlas cell is sampled with. The two-argument form takes the
 // screen derivatives of uv itself; when uv is a fract() of a longer varying,
@@ -103,7 +103,7 @@ float vt_combine(float xcov, float ycov, float xwgt, float ywgt) {
 }
 
 float vt_coverage(int code, vec2 uv, vec2 duvdx, vec2 duvdy) {
-    code = clamp(code, 0, 127);
+    code = clamp(code, 0, 255);
     uvec2 d0 = texelFetch(vt_bands, ivec2(4 * code, 0), 0).xy;
     uvec2 d1 = texelFetch(vt_bands, ivec2(4 * code + 1, 0), 0).xy;
     uvec2 d2 = texelFetch(vt_bands, ivec2(4 * code + 2, 0), 0).xy;

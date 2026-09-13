@@ -17,10 +17,9 @@ index.json carries "corpus": "book" and "page_lines", and atlas_layout.py
 lays a book out as a grid of pages in reading order, one band of whole page
 rows per part, instead of a treemap.
 
-Lines stay as Gutenberg wrapped them (about 72 columns) and are normalised
-to ASCII like source: curly quotes straight, the em dash `--`, accents
-stripped (Natásha to Natasha), since both glyph tiers cover ASCII (README,
-open question 2). Words are the ident kind, numbers the number kind, the
+The text is kept in Windows-1252, which both glyph tiers cover: curly
+quotes, dashes, the ellipsis and accented letters as they are (Natásha keeps
+her accent), anything outside it `?`. Words are the ident kind, numbers the number kind, the
 rest punctuation; no string literals, no items.
 
   ./book_index.py --gutenberg 2600 --out data/war-and-peace_atlas
@@ -50,7 +49,7 @@ DEFAULT_FONT = "fonts/Literata-Regular.ttf"
 DEFAULT_LEADING = 1.3      # the line box over the ink extents: a book's air between lines
 BAR_HEIGHT = 0.7           # bars and word blocks stand this much of a row tall (the shaders' barf)
 COLOURS = {"ground": "a0a9af", "page": "ffffff", "bar": "000000", "band": "a0a9af",
-           "kinds": ["000000", "141414", "141414", "141414", "141414", "6a6a6a", "141414", "4a4a4a", "141414", "141414"],
+           "kinds": ["000000", "141414", "141414", "141414", "141414", "6a6a6a", "141414", "141414", "141414", "141414"],
            "items": ["7aa2f7", "e0c080", "d7a0a8", "5fb7b7", "8c909a"]}
 
 
@@ -75,12 +74,17 @@ START_RX = re.compile(r"^\*\*\* ?START OF")
 END_RX = re.compile(r"^\*\*\* ?END OF")
 GUTENBERG_URL = "https://www.gutenberg.org/cache/epub/{n}/pg{n}.txt"
 
-# characters outside ASCII that have an ASCII spelling; accents are
-# stripped by decomposition, everything else becomes '?'
-ASCII_MAP = str.maketrans({"“": '"', "”": '"', "‘": "'", "’": "'",
-                           "—": "--", "–": "-", "…": "...", "•": "*",
-                           "™": "(TM)", "œ": "oe", "Œ": "OE", "æ": "ae",
-                           "Æ": "AE", "ß": "ss", " ": " "})
+CHARSET = "cp1252"         # the book's bytes: curly quotes, dashes, the ellipsis and accented Latin letters kept
+# characters outside Windows-1252 with a spelling in it; the rest become '?'
+CHAR_MAP = str.maketrans({"\u00a0": " ", "\u2010": "-", "\u2011": "-", "\u2212": "-",
+                          "\u2032": "'", "\u2033": '"', "\u017f": "s"})
+
+
+def to_charset(text):
+    """The text in the book's charset: composed (NFC), a few characters
+    outside it respelled, anything else '?'."""
+    text = unicodedata.normalize("NFC", text).translate(CHAR_MAP)
+    return text.encode(CHARSET, "replace").decode(CHARSET)
 
 
 def header_field(lines, key):
@@ -96,26 +100,20 @@ def header_field(lines, key):
 class Measure:
     """Line widths in the book's face, in line heights, for the reflow, the
     footer and the centred headings: the face's advances from
-    atlas_layout.font_advances, in the scheme's leading."""
+    atlas_layout.font_advances, in the scheme's leading, over the book's
+    charset."""
     def __init__(self, face, leading=1.0):
         adv, _ = font_advances(face, leading)
-        self.adv = [0.0] * 128
-        self.adv[32:127] = adv["per_glyph"]
+        self.adv = [0.0] * 256
+        self.adv[32:32 + len(adv["per_glyph"])] = adv["per_glyph"]
         self.space = self.adv[32]
 
     def width(self, text):
-        return sum(self.adv[ord(c)] if ord(c) < 128 else self.adv[63] for c in to_ascii(text))
+        return sum(self.adv[b] for b in to_charset(text).encode(CHARSET, "replace"))
 
     def spaces(self, w, floor=False):
         n = int(w / self.space) if floor else int(round(w / self.space))
         return max(n, 1)
-
-
-def to_ascii(text):
-    text = text.translate(ASCII_MAP)
-    text = unicodedata.normalize("NFKD", text)
-    text = "".join(c for c in text if not unicodedata.combining(c))
-    return text.encode("ascii", "replace").decode("ascii")
 
 
 def title(heading):
@@ -214,7 +212,7 @@ def index_page(relpath, lines, footer=False):
     """The ("ok", ...) tuple atlas_index.index_file returns, for prose. With
     `footer` the last line is the running footer, in the comment kind so
     the scheme can grey it."""
-    raw = [to_ascii(ln).expandtabs(TAB).encode("ascii").translate(_CTRL).rstrip()[:MAX_COLS]
+    raw = [to_charset(ln).expandtabs(TAB).encode(CHARSET, "replace").translate(_CTRL).rstrip()[:MAX_COLS]
            for ln in lines]
     joined = b"\n".join(raw)
     line_len = np.fromiter((len(ln) for ln in raw), np.int64, len(raw))
@@ -403,15 +401,15 @@ def main():
         width = page_width(parts, measure)
     dirs, files, file_dir, results = build(parts, args.page_lines, args.name, measure, width, author, book_title)
     skipped = {"binary": 0, "large": 0, "submodules": 0}
-    freq = np.zeros(128)
+    freq = np.zeros(256)
     for r in results:
-        freq += np.bincount(np.frombuffer(r[4], np.uint8), minlength=128)[:128]
-    scheme = scheme_for(args.font, args.leading, freq[32:127])
+        freq += np.bincount(np.frombuffer(r[4], np.uint8), minlength=256)[:256]
+    scheme = scheme_for(args.font, args.leading, freq[32:256])
     seconds = round(time.time() - t0, 2)
     stats = write_index(args.out, args.name, os.path.abspath(args.text), dirs, files, file_dir,
                         results, skipped, seconds,
                         extra={"corpus": "book", "page_lines": args.page_lines, "page_rows": args.page_lines + 3,
-                               "title": book_title, "author": author, "scheme": scheme})
+                               "encoding": CHARSET, "title": book_title, "author": author, "scheme": scheme})
     n_chapters = sum(len(c) for _, c in parts)
     print(f"wrote {args.out}/index.npz + index.json: {len(parts)} parts, {n_chapters} chapters, "
           f"{stats['files']} pages, {stats['lines']} lines, {stats['chars'] / 1e6:.2f} M chars "

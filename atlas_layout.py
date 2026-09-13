@@ -546,7 +546,7 @@ def render_preview(path, world, dirs, dir_rect, dir_pad, dir_hue, file_rect, fil
 def font_advances(face, leading=1.0):
     """The advances of a face under the repository, in line heights (the
     ink box stretched by `leading`): {"cell": the widest (the atlas cell),
-    "per_glyph": 95 values for ASCII 32..126}, and whether they differ."""
+    "per_glyph": 224 values for the bytes 32..255}, and whether they differ."""
     import sys
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import atlas_font
@@ -600,10 +600,10 @@ def build_layout(args, z, meta, t0):
         advances, proportional = font_advances(face, float(scheme.get("leading", 1.0)))
         if proportional:
             args.char_aspect = advances["cell"]
-            adv = np.zeros(128, np.float64)
-            adv[32:127] = advances["per_glyph"]
-            adv[:32] = adv[127] = adv[63]
-            char_w = adv[np.minimum(z["chars"].astype(np.int64), 127)]
+            adv = np.zeros(256, np.float64)
+            adv[32:32 + len(advances["per_glyph"])] = advances["per_glyph"]
+            adv[:32] = adv[63]
+            char_w = adv[z["chars"].astype(np.int64)]
             prop = (adv, HANG * float(np.mean(advances["per_glyph"])))
     if prop:
         start = np.concatenate(([0.0], np.cumsum(char_w)))

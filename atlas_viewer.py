@@ -221,7 +221,7 @@ def run_search(atlas, word):
     word is too short."""
     if len(word) < 2:
         return None
-    w = word.encode("ascii", "replace")
+    w = word.encode(atlas["index"].get("encoding", "ascii"), "replace")
     pat = re.compile(rb"\b" + re.escape(w) + rb"\b")
     buf, line_off_nl = joined_lines(atlas)
     # scan in chunks so the GIL changes hands between them and the frame
@@ -315,8 +315,8 @@ class Viewer:
         else:
             self.ui_glyphs, self.ui_gm = atlas_font.build_atlas(atlas_font.DEFAULT_FONT, 0, 64)
         self.ui_aspect = self.ui_gm["cell_w"] / self.ui_gm["cell_h"]
-        self.adv = np.zeros(96, np.float32)                        # advances in line heights, ASCII 32..126
-        self.adv[:95] = self.gm["advances"]
+        self.adv = np.zeros(224, np.float32)                       # advances in line heights, bytes 32..255
+        self.adv[:len(self.gm["advances"])] = self.gm["advances"]
         self.vt = load_vector_tier(args.font, args.font_index, self.leading) if args.vector_text else None
         self.load_seconds = time.perf_counter() - t0
 
@@ -560,7 +560,7 @@ class Viewer:
                     glUniform1i(loc, UI_UNIT if n == "text" and tex == "uGlyphs" else i)
             loc = glGetUniformLocation(p, "uAdv")
             if loc >= 0:
-                glUniform1fv(loc, 96, self.adv)
+                glUniform1fv(loc, 224, self.adv)
             loc = glGetUniformLocation(p, "uAdvMax")
             if loc >= 0:
                 glUniform1f(loc, self.gm["char_aspect"])
@@ -1236,7 +1236,7 @@ class Viewer:
 
     def line_text(self, line):
         lo = self.a["line_off"]
-        return self.a["chars"][lo[line]:lo[line + 1]].tobytes().decode("ascii", "replace")
+        return self.a["chars"][lo[line]:lo[line + 1]].tobytes().decode(self.a["index"].get("encoding", "ascii"), "replace")
 
     def panel_chars(self):
         """characters per results row: 180 points wide, 11 point text"""

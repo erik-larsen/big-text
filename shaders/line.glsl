@@ -138,7 +138,7 @@ void main() {
 #endif
     {
         int g = int(ch) - 32;
-        if (g < 0 || g > 94) g = 31;        // '?'
+        if (g < 0 || g > 223) g = 31;       // '?'
         vec2 cell = vec2(g & 15, g >> 4);
         vec2 scale = uGlyph.xy / uGlyph.zw; // cell pixels -> atlas uv
         cov = textureGrad(uGlyphs, (cell + uv) * scale, gdx * scale, gdy * scale).r;

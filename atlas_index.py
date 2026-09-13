@@ -155,7 +155,9 @@ SPECS = {
 _TEXT_STRING = rb"(?P<string>\"(?:[^\"\\\n]|\\.)*\")"
 _TEXT_TAIL = (rb"(?P<number>\b\d+(?:\.\d+)?\b)", rb"(?P<ident>" + _IDENT + rb")")
 SPECS["text"] = (_rx(_TEXT_STRING, *_TEXT_TAIL), set(), set(), False)
-SPECS["prose"] = (_rx(*_TEXT_TAIL), set(), set(), False)     # a book: words and numbers, no string literals
+_WORD = rb"[A-Za-z_\x80-\xff][A-Za-z0-9_\x80-\xff]*"           # a word of a Windows-1252 text: accents are letters
+SPECS["prose"] = (_rx(rb"(?P<number>\b\d+(?:\.\d+)?\b)", rb"(?P<ident>" + _WORD + rb")"),
+                  set(), set(), False)                        # a book: words and numbers, no string literals
 SPECS["text-hash"] = (_rx(rb"(?P<comment>#[^\n]*)", _TEXT_STRING, *_TEXT_TAIL), set(), set(), False)
 SPECS["text-xml"] = (_rx(rb"(?P<comment><!--[\s\S]*?-->)", _TEXT_STRING, *_TEXT_TAIL), set(), set(), False)
 SPECS["text-css"] = (_rx(rb"(?P<comment>/\*[\s\S]*?\*/)", _TEXT_STRING, *_TEXT_TAIL), set(), set(), False)

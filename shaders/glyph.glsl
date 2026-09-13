@@ -24,7 +24,7 @@ uniform vec4 uView;
 uniform float uScale;
 uniform float uFocusW;
 uniform float uZScale;
-uniform float uAdv[96];
+uniform float uAdv[224];
 uniform int uBase;
 out vec2 vUV;
 flat out int vCode;
@@ -49,7 +49,7 @@ void main() {
     vec4 meta = texelFetch(uFileF, tc(3 * f + 1), 0);
     vec4 zz = texelFetch(uFileF, tc(3 * f + 2), 0);
     float p = meta.x;
-    int code = clamp(ch, 32, 127) - 32;
+    int code = clamp(ch, 32, 255) - 32;
     float adv = uAdv[code];
     vec2 p0 = lf.xy + vec2(cf.y * p, 0.0);
     vec2 p1 = p0 + vec2(adv * p, p);
@@ -71,7 +71,7 @@ uniform sampler2D uGlyphs;
 uniform vec4 uGlyph;        // cell_w, cell_h, atlas_w, atlas_h (pixels)
 uniform vec3 uKindColor[10];
 uniform float uVtMin;
-uniform float uAdv[96];
+uniform float uAdv[224];
 uniform float uAdvMax;      // the atlas cell's advance in line heights
 uniform vec3 uInk;          // the scheme's ink: z is the word blocks' alpha
 in vec2 vUV;

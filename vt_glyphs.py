@@ -63,7 +63,7 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_FONT = str(HERE / "fonts" / "JetBrainsMonoNL-Regular.ttf")
-FIRST, LAST = 32, 126
+FIRST, LAST = 32, 255          # the bytes of Windows-1252, as atlas_font
 TEX_W = 4096               # both textures, as in the reference (kLogBandTextureWidth 12)
 LOG_W = 12
 MAX_BANDS = 32             # the ceiling per axis; 16 left the fullest bands longer at large sizes, 64 thrashed the cache
@@ -109,8 +109,9 @@ def font_outlines(font_path, index=0, max_err=0.5, box=None):
     glyphs = {}
     advances = []
     per_glyph = {}
+    import atlas_font
     for code in range(FIRST, LAST + 1):
-        name = cmap.get(code, notdef)
+        name = cmap.get(ord(atlas_font.byte_char(code)), notdef)
         if name is None:
             glyphs[code] = []
             continue

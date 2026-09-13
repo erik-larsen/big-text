@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Stage 3: raster glyph atlas for the text LOD and the UI text.
 
-Renders the 95 printable ASCII glyphs (32..126) with Pillow into a grid of
-equal cells: 16 columns, 6 rows for ASCII plus one extra row of UI symbols
-(arrows, the middle dot, the ellipsis) that the viewer's crumb trail and
-status line use. Each cell is `cell` pixels tall (one line pitch) and
+Renders the 224 glyphs of Windows-1252 (bytes 32..255: printable ASCII,
+then the curly quotes, dashes and ellipsis of 0x80..0x9F and the accented
+Latin letters of 0xA0..0xFF) with Pillow into a grid of equal cells: 16
+columns, 14 rows, plus one extra row of UI symbols (the arrows) that the
+viewer's crumb trail uses. A corpus's characters are bytes in that
+encoding; a code corpus uses the ASCII part. Each cell is `cell` pixels tall (one line pitch) and
 round(cell * A) wide, where A = advance / (ascent + descent) is the
 character aspect the layout stage also uses; for a proportional face the
 advance is the widest glyph's, every glyph drawn from the cell's left edge,
@@ -30,12 +32,19 @@ from PIL import Image, ImageDraw, ImageFont
 from fontTools.ttLib import TTFont
 
 DEFAULT_FONT = str(Path(__file__).resolve().parent / "fonts" / "JetBrainsMonoNL-Regular.ttf")
-COLS, ROWS_ASCII, FIRST, LAST = 16, 6, 32, 126
+COLS, ROWS_CHARS, FIRST, LAST = 16, 14, 32, 255
+CHARSET = "cp1252"
 # row 6 of the atlas: symbols the UI uses that are not ASCII. Cell index
 # = 96 + position. Missing glyphs fall back to the ASCII stand-in.
-EXTRA = [("←", "<"), ("›", ">"), ("·", "."), ("…", "-"),
-         ("→", ">"), ("↑", "^"), ("↓", "v")]
-ROWS = ROWS_ASCII + 1
+EXTRA = [("←", "<"), ("→", ">"), ("↑", "^"), ("↓", "v")]
+ROWS = ROWS_CHARS + 1
+
+
+def byte_char(b):
+    """The character of byte b in the charset ('?' for the five bytes
+    Windows-1252 leaves undefined)."""
+    c = bytes([b]).decode(CHARSET, "replace")
+    return "?" if c == "\ufffd" else c
 
 
 def font_advances(font_path, index=0):
@@ -44,7 +53,8 @@ def font_advances(font_path, index=0):
     tt = TTFont(font_path, fontNumber=index)
     cmap = tt.getBestCmap()
     hmtx = tt["hmtx"]
-    adv = [hmtx[cmap.get(c, ".notdef")][0] if cmap.get(c, ".notdef") in hmtx.metrics else 0
+    adv = [hmtx[cmap.get(ord(byte_char(c)), ".notdef")][0]
+           if cmap.get(ord(byte_char(c)), ".notdef") in hmtx.metrics else 0
            for c in range(FIRST, LAST + 1)]
     return adv, len(set(adv)) > 1
 
@@ -63,7 +73,7 @@ def font_box(font_path, index, leading=1.0):
     advances, proportional = font_advances(font_path, index)
     adv = max(advances) if proportional else tt["hmtx"][cmap.get(ord("M"), ".notdef")][0]
     top = bottom = None
-    for c in range(FIRST, LAST + 1):
+    for c in range(FIRST, 127):            # the box is the ASCII ink extents: accents ride in the leading
         g = cmap.get(c)
         if g is None:
             continue
@@ -100,9 +110,10 @@ def build_atlas(font_path=DEFAULT_FONT, index=0, cell=64, leading=1.0):
     for c in range(FIRST, LAST + 1):
         k = c - FIRST
         x, y = (k % COLS) * cell_w, (k // COLS) * cell
-        draw.text((x, y + baseline), chr(c), font=font, fill=255, anchor="ls")
+        ch = byte_char(c)
+        draw.text((x, y + baseline), ch if ch in have else "?", font=font, fill=255, anchor="ls")
     for i, (sym, alt) in enumerate(EXTRA):
-        k = ROWS_ASCII * COLS + i
+        k = ROWS_CHARS * COLS + i
         x, y = (k % COLS) * cell_w, (k // COLS) * cell
         draw.text((x, y + baseline), sym if sym in have else alt,
                   font=font, fill=255, anchor="ls")
@@ -112,7 +123,7 @@ def build_atlas(font_path=DEFAULT_FONT, index=0, cell=64, leading=1.0):
                "advances": [a / line for a in advances],      # per glyph, in line heights
                "leading": leading,
                "cols": COLS, "rows": ROWS, "first": FIRST,
-               "extra": {sym: ROWS_ASCII * COLS + i
+               "extra": {sym: ROWS_CHARS * COLS + i
                          for i, (sym, _) in enumerate(EXTRA)},
                "font": font_path, "index": index}
     return np.asarray(img, np.uint8).copy(), metrics
@@ -120,15 +131,16 @@ def build_atlas(font_path=DEFAULT_FONT, index=0, cell=64, leading=1.0):
 
 def mean_ink(font_path, index=0, leading=1.0, freq=None):
     """How dark the face's text is: the mean coverage of a glyph's advance
-    box, averaged over the ASCII glyphs weighted by `freq` (95 counts for
-    32..126, a corpus's letter frequencies; uniform when None), and the
+    box, averaged over the glyphs weighted by `freq` (224 counts for bytes
+    32..255, a corpus's letter frequencies; uniform when None), and the
     fraction of characters that are spaces. A scheme's ink is derived from
     these so bars and blocks carry the mean ink of the text they replace."""
     atlas, m = build_atlas(font_path, index, 64, leading)
     cw, ch, A = m["cell_w"], m["cell_h"], m["char_aspect"]
-    freq = np.ones(95) if freq is None else np.asarray(freq, np.float64)
-    cov = np.zeros(95)
-    for k in range(95):
+    n = LAST - FIRST + 1
+    freq = np.ones(n) if freq is None else np.asarray(freq, np.float64)
+    cov = np.zeros(n)
+    for k in range(n):
         x, y = (k % COLS) * cw, (k // COLS) * ch
         w = max(int(round(cw * m["advances"][k] / A)), 1)     # the glyph's advance box inside the cell
         cov[k] = atlas[y:y + ch, x:x + w].mean() / 255.0
@@ -138,10 +150,14 @@ def mean_ink(font_path, index=0, leading=1.0, freq=None):
 
 
 def glyph_cell(ch, metrics):
-    """Atlas cell index for one character (UI text path)."""
-    o = ord(ch)
-    if FIRST <= o <= LAST:
-        return o - FIRST
+    """Atlas cell index for one character (UI text path): its byte in the
+    charset, else the extra row, else '?'."""
+    try:
+        b = ch.encode(CHARSET)[0]
+        if FIRST <= b <= LAST:
+            return b - FIRST
+    except UnicodeEncodeError:
+        pass
     return metrics["extra"].get(ch, ord("?") - FIRST)
 
 

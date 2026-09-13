@@ -13,7 +13,7 @@ Regenerate everything with:
 ./atlas_layout.py data/war-and-peace_atlas --preview docs/shots/war-and-peace_layout.png
 ./atlas_viewer.py data/big-text_atlas --shots docs/shots/big-text --filter Viewer --stats
 ./atlas_viewer.py data/emscripten_atlas --shots docs/shots/emscripten --filter EM_JS --stats
-./atlas_viewer.py data/war-and-peace_atlas --shots docs/shots/war-and-peace --filter Natasha --stats
+./atlas_viewer.py data/war-and-peace_atlas --shots docs/shots/war-and-peace --filter Natásha --stats
 ./atlas_viewer.py data/big-text_atlas --proj 3d --heights --tilt 55 --yaw 12 --tint --frames 1 --no-hover --screenshot docs/shots/big-text/hero.png
 ./atlas_viewer.py data/big-text_atlas --proj 3d --heights --tilt 55 --yaw 12 --hover atlas_index.py:169:5 --frames 2 --screenshot docs/shots/big-text/3d_text.png
 ./atlas_viewer.py data/big-text_atlas --goto README.md:62 --zoom 14 --frames 2 --screenshot docs/shots/big-text/wrapped.png
@@ -67,9 +67,9 @@ The default example, so the counts move whenever this documentation is edited. T
 
 The whole tree as git tracks it, test suites and system libraries included, at the commit cloned. The standard set with `--filter EM_JS` (126 hits in 53 files, grouped by file), plus `3d_text.png` (`--proj 3d --heights --hover emcc.py:199:5`, text zoom on a roof in perspective with the hover label `emcc.py:199 def main`) and `churn.png` (the tint over 30,274 commits: every file's fill ember by the log of its lines added and removed, the vendored test suites under `test/third_party` the brightest, having landed whole).
 
-## War and Peace (Project Gutenberg 2600: 18 parts, 366 chapters, 1,467 Letter pages of 40 reflowed lines, 63,081 lines, 2.67 million glyphs)
+## War and Peace (Project Gutenberg 2600: 18 parts, 366 chapters, 1,468 Letter pages of 40 reflowed lines, 63,124 lines, 2.67 million glyphs)
 
-In the book's own scheme, Dobbie's: white pages and black text on his demo's blue-grey ground, the text in Literata, justified, with a book's leading, every glyph placed by its own advance, the pages fading to pale grey as the text gives way to blocks and bars, every page with its running footer. The standard set with `--filter Natasha` (1,213 hits on 310 pages), a book having no tint, plus:
+In the book's own scheme, Dobbie's: white pages and black text on his demo's blue-grey ground, the text in Literata, justified, with a book's leading, every glyph placed by its own advance, the quotes curly and the accents kept, the pages fading to pale grey as the text gives way to blocks and bars, every page with its running footer. The standard set with `--filter Natásha` (1,213 hits on 310 pages), a book having no tint, plus:
 
 - `war-and-peace/overview.png`: the map fitted: one grid of pages in reading order, the front matter's contents pages first, each page a cell at the line-bars LOD; no part is drawn, the crumb trail names the one under the centre.
 - `war-and-peace/hover.png`: the text view hovered at the centre: the label `Book Eight: 1811 - 12/Chapter IX/p. 657` (part, chapter, page; a book has no items).
