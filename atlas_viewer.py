@@ -1010,18 +1010,21 @@ class Viewer:
         """z base and height per file and directory from the current layout's
         metric: directories are terraces of DIR_STEP per level, files sit on
         their directory's terrace with a height of H_MAX * sqrt(metric /
-        max). A book's pages are all H_MAX: a page is a page, whatever it
-        holds."""
+        max). A book has no heights at all: its 3D view is the flat sheet
+        tilted, no page or part extruded."""
         a = self.a
         depth = a["dir_depth"].astype(np.float64)
-        self.dir_z0 = np.maximum(depth - 1, 0) * DIR_STEP
-        self.dir_h = np.where(depth >= 1, DIR_STEP, 0.0)
+        flat = a["index"].get("corpus") == "book"     # a book is one flat sheet: nothing rises
+        self.dir_z0 = np.maximum(depth - 1, 0) * (0.0 if flat else DIR_STEP)
+        self.dir_h = np.where(depth >= 1, 0.0 if flat else DIR_STEP, 0.0)
         top = self.dir_z0 + self.dir_h
         m = a.get("file_metric")
-        if m is None or a["index"].get("corpus") == "book":   # a book: every page one height
+        if m is None:
             m = np.ones(self.n_files)
         m = np.asarray(m, np.float64)
         self.file_h = H_MAX * np.sqrt(np.maximum(m, 0) / max(float(m.max()), 1e-9))
+        if flat:
+            self.file_h[:] = 0.0
         self.file_z0 = top[a["file_dir"]]
         self.file_top = self.file_z0 + self.file_h
 

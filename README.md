@@ -6,9 +6,9 @@ big-text is the text-scale sibling of [big-picture](https://github.com/erik-lars
 
 *big-text viewing itself: 33 files and about 9,500 lines tilted into 3D with the churn lens, the most edited files ember, every roof carrying its code at the rung its size allows, and the rail along the bottom the repository's commits.*
 
-![War and Peace in 3D at 3 pixels per line: the near pages as text, the far rows as line bars, the Books as coloured terraces](docs/shots/war-and-peace/hero.png)
+![War and Peace tilted at 3 pixels per line: one flat sheet of pages, the near ones as text, the far rows as line bars, the Books as coloured bands](docs/shots/war-and-peace/hero.png)
 
-*The same viewer on War and Peace, Dobbie's example: 1,401 pages and 2.63 million glyphs as one surface, the Books as terraces, the near pages at the text rung and the far rows at bars in the same frame.*
+*The same viewer on War and Peace, Dobbie's example: 1,401 pages and 2.63 million glyphs as one flat sheet, tilted, the near pages at the text rung and the far rows at bars in the same frame, the Books as bands.*
 
 It shows three kinds of content, in this order of priority: text, images, 2D vector work. Each has an open-source lineage, and the ladder that ties them together has a fourth:
 
@@ -127,8 +127,8 @@ Dobbie's example, War and Peace, needs nothing beyond the install: no submodule,
 ```
 
 1. `book_index.py` fetches Project Gutenberg ebook 2600 (3.4 MB) into `data/gutenberg/pg2600.txt` on the first run and reads it from there after, drops Gutenberg's header and footer, and splits the text on its headings: `BOOK ONE: 1805` and the two epilogues open a part, `CHAPTER I` a chapter, every 52 lines of a chapter are a page. It writes `data/war-and-peace_atlas/index.npz` and `index.json`, the same index a source tree gets, with parts as directories and pages as files named `Book One: 1805/Chapter I/p. 17`, and prints the counts: 18 parts, 366 chapters, 1,401 pages, 2.63 million glyphs, half a second.
-2. `atlas_layout.py` sees `"corpus": "book"` in the index and lays the pages out in reading order instead of a treemap: every part a full-width band of whole page rows, every page one cell, 65 pages across, and writes `layout.npz`, with lines as the book's one metric; in 3D every page stands at the same height whatever it holds, a page being a page. Add `--preview docs/shots/war-and-peace_layout.png` to render the result with Pillow without opening a window.
-3. `atlas_viewer.py` opens the book fitted to the window. Everything in Controls works except what needs a resolver or a history: `/` filters (`Natasha` finds 1,213 mentions on 299 pages), Enter flies to the next hit, `3` tilts the book into 3D, hover names the part, chapter and page under the cursor. There is no Inspector, no colour lens and no revision rail, since a book has no definitions and no commits.
+2. `atlas_layout.py` sees `"corpus": "book"` in the index and lays the pages out in reading order instead of a treemap: every part a full-width band of whole page rows, every page one cell, 65 pages across, and writes `layout.npz`, with lines as the book's one metric; in 3D a book is one flat sheet, nothing extruded, the tilt just a way of looking at it. Add `--preview docs/shots/war-and-peace_layout.png` to render the result with Pillow without opening a window.
+3. `atlas_viewer.py` opens the book fitted to the window. Everything in Controls works except what needs a resolver or a history: `/` filters (`Natasha` finds 1,213 mentions on 299 pages), Enter flies to the next hit, `3` tilts the sheet (a book has no heights in 3D), hover names the part, chapter and page under the cursor. There is no Inspector, no colour lens and no revision rail, since a book has no definitions and no commits.
 
 The README's second image is the viewer scripted from the shell, and the opening pages are one flag away:
 
