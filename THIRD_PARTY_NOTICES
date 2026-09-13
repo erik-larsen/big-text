@@ -1,4 +1,4 @@
-Third-party material in big-text and how it is used. big-text itself is MIT (LICENSE).
+Third-party material in big-text and how it is used.
 
 Slug reference shaders. The repository is pinned as the slug/ submodule (commit be3c13e) and shaders/vt_glyph.glsl is a GLSL translation of SlugRender and its helpers from it, https://github.com/EricLengyel/Slug, "Reference code for the Slug Algorithm", Copyright 2017, by Eric Lengyel, SPDX-License-Identifier: MIT OR Apache-2.0. The repository's README states: "The code in this repository may be freely used by anyone for any purpose. The patent has been dedicated to the public domain. If you do use this code in software that gets distributed in any way, then you are required to give credit." The algorithm is described in E. Lengyel, "GPU-Centered Font Rendering Directly from Glyph Outlines", Journal of Computer Graphics Techniques 6(2), 2017. US patent 10,373,352 was dedicated to the public domain on 2026-03-17.
 
@@ -8,4 +8,4 @@ Will Dobbie's GPU text technique. The atlas format and the two-tier glyph design
 
 Submodules. big-picture (Erik Larsen, MIT), HEPR (soadzoor, MIT) and Slug (above) are pinned as git submodules and carry their own licence files; big-text reads them as references and does not copy their code beyond the Slug shader named above.
 
-makepad. The Studio code atlas's ladder of representations is reimplemented from the public repository's history and Rik Arends' video (https://github.com/makepad/makepad, Makepad B.V., MIT by its LICENSE, its crates declaring MIT OR Apache-2.0); no code of it is used, and the public tree is only a corpus the reader clones for the scale example.
+makepad. The Studio code atlas's ladder of representations is reimplemented from the public repository's history and Rik Arends' video (https://github.com/makepad/makepad, Makepad B.V., MIT by its LICENSE, its crates declaring MIT OR Apache-2.0); no code of it is used.

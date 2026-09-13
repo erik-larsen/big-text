@@ -1,5 +1,5 @@
 # generated atlases (atlas_index.py, atlas_layout.py) and glyph data
-data/
+data/*_atlas
 
 __pycache__/
 .venv/

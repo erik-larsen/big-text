@@ -247,17 +247,17 @@ The decisions and their reasons are in [docs/DESIGN.md](docs/DESIGN.md). Open:
 
 ## Licences
 
-big-text is MIT ([LICENSE](LICENSE), Erik Larsen). What it reuses, with the licence and the way it is reused: pin (a submodule at a commit, the upstream licence applying inside it), translate (code ported with the upstream notice kept), or reimplement (only the published description used, no code). [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES) carries the notices.
+What big-text reuses, with the licence and the way it is reused: pin (a submodule at a commit, the upstream licence applying inside it), translate (code ported with the upstream notice kept), or reimplement (only the published description used, no code). [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES) carries the notices.
 
 | Part | Author, licence | How it is reused |
 |---|---|---|
 | big-picture | Erik Larsen, MIT | pin |
-| makepad (public engine) | Makepad B.V., MIT by the repository's LICENSE; its crates declare MIT OR Apache-2.0 in their Cargo.toml, and the vendored libraries under `libs/` carry their own | reimplement: the ladder from the video and the commit messages, its private crates not used; the public tree is a corpus for the scale example, cloned by the reader, nothing of it committed |
+| makepad (public engine) | Makepad B.V., MIT by the repository's LICENSE; its crates declare MIT OR Apache-2.0 in their Cargo.toml, and the vendored libraries under `libs/` carry their own | reimplement: the ladder from the video and the commit messages, its private crates not used |
 | Slug | Eric Lengyel, MIT or Apache-2.0; patent US 10,373,352 dedicated to the public domain 2026-03-17 | pin at be3c13e; the pixel shader translated to GLSL in `shaders/vt_glyph.glsl` with the notice kept. The 2017 JCGT supplemental GLSL is under the journal's terms and is not used |
 | HEPR | soadzoor, MIT | pin at c81c326 (0.1.29); its stroke and fill shaders will be translated with their notices when the vector work starts |
 | Dobbie's technique, formats and tiers | Will Dobbie, 2016, blog posts, no licence published | reimplement from the posts; no code or data of his is used |
 | JetBrains Mono NL | JetBrains, OFL 1.1 | pin: `fonts/JetBrainsMonoNL-Regular.ttf` with `fonts/OFL.txt` and `fonts/AUTHORS.txt`; the atlases the viewer builds from it are embeddings in the OFL's sense |
-| War and Peace | Leo Tolstoy, Maude translation, public domain via Project Gutenberg (ebook 2600) | the book corpus: `book_index.py --gutenberg 2600` fetches it into `data/gutenberg/`, which git ignores; nothing of it is committed but the screenshots |
+| War and Peace | Leo Tolstoy, Maude translation, public domain via Project Gutenberg (ebook 2600) | the book corpus: `book_index.py --gutenberg 2600` fetches it into `data/gutenberg/` |
 
 The default face is JetBrains Mono NL Regular: OFL, TrueType with quadratic outlines so the vector tier converts nothing, and legible at the small sizes the ladder spends most of its time at. Its OS/2 line box carries 1.32 em of leading, which would shrink every glyph at a given pixels per line, so the line box is defined as the face's ASCII ink extents, 1.05 em. `--font` takes any face on the machine; nothing generated from a font is committed.
 
