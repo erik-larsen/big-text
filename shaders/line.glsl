@@ -53,9 +53,14 @@ void main() {
     // the row's width in line heights (lf.w) from the layout: the clipped
     // character count times the aspect for a monospace face, the sum of the
     // advances for a proportional one
-    vec2 p1 = p0 + vec2(lf.w * p, lod == 0 ? 1.0 / uScale : p);
-    kill = kill || p1.x < uView.x || p0.x > uView.z || p1.y < uView.y || p0.y > uView.w;
     float z = (zz.x + zz.y) * uZScale + 0.04;
+    // a sampled bar is one device pixel tall where it is: at this row's
+    // depth, w / (uScale * uFocusW) world units (1 / uScale in 2D); a bar
+    // sized at the focus would thin to nothing in the distance and fall
+    // between pixel rows, whole rows of pages flickering white
+    float w0 = max((uMVP * vec4(p0, z, 1.0)).w, 1e-6);
+    vec2 p1 = p0 + vec2(lf.w * p, lod == 0 ? w0 / (uScale * uFocusW) : p);
+    kill = kill || p1.x < uView.x || p0.x > uView.z || p1.y < uView.y || p0.y > uView.w;
     gl_Position = kill ? vec4(-2.0, -2.0, 0.0, 1.0) : uMVP * vec4(mix(p0, p1, aQuad), z, 1.0);
     vUV = aQuad;
     vOff = uvec2(lu.x, lu.w);
