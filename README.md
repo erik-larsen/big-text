@@ -114,7 +114,11 @@ git submodule update --init makepad
 ./atlas_viewer.py data/makepad-draw_atlas
 ```
 
-For the book, Dobbie's example: fetch War and Peace from Project Gutenberg (3.4 MB, once, into `data/gutenberg/`), split it into its 15 Books and two epilogues, 366 chapters and 1,401 pages of 52 lines, and lay the pages out in reading order, one band of whole page rows per Book. Half a second, and the viewer, filter and fly-to work unchanged; there is no resolver or history for a book, so no Inspector, lenses or rail:
+Glyphs from 12 device pixels per line come from the vector tier by default, crisp at any magnification; the first run builds its curve and band textures in a tenth of a second and caches them under `data/`, and `--no-vector-text` keeps the raster atlas at every size. `--goto path:line`, `--zoom PX_PER_LINE`, `--filter WORD`, `--step K`, `--color churn|age|changes`, `--rev HASH`, `--compare HASH`, `--history`, `--frames N --screenshot out.png`, `--shots DIR` and `--stats` script the viewer for screenshots and timing; `docs/shots/README.md` lists the commands that made every image here.
+
+### The book
+
+Dobbie's example, War and Peace, needs nothing beyond the install: no submodule, no git, no tree-sitter. There is no build step here either; the build is three commands, and the whole thing takes about a second:
 
 ```bash
 ./book_index.py --gutenberg 2600 --out data/war-and-peace_atlas
@@ -122,7 +126,18 @@ For the book, Dobbie's example: fetch War and Peace from Project Gutenberg (3.4 
 ./atlas_viewer.py data/war-and-peace_atlas
 ```
 
-Glyphs from 12 device pixels per line come from the vector tier by default, crisp at any magnification; the first run builds its curve and band textures in a tenth of a second and caches them under `data/`, and `--no-vector-text` keeps the raster atlas at every size. `--goto path:line`, `--zoom PX_PER_LINE`, `--filter WORD`, `--step K`, `--color churn|age|changes`, `--rev HASH`, `--compare HASH`, `--history`, `--frames N --screenshot out.png`, `--shots DIR` and `--stats` script the viewer for screenshots and timing; `docs/shots/README.md` lists the commands that made every image here.
+1. `book_index.py` fetches Project Gutenberg ebook 2600 (3.4 MB) into `data/gutenberg/pg2600.txt` on the first run and reads it from there after, drops Gutenberg's header and footer, and splits the text on its headings: `BOOK ONE: 1805` and the two epilogues open a part, `CHAPTER I` a chapter, every 52 lines of a chapter are a page. It writes `data/war-and-peace_atlas/index.npz` and `index.json`, the same index a source tree gets, with parts as directories and pages as files named `Book One: 1805/Chapter I/p. 17`, and prints the counts: 18 parts, 366 chapters, 1,401 pages, 2.63 million glyphs, half a second.
+2. `atlas_layout.py` sees `"corpus": "book"` in the index and lays the pages out in reading order instead of a treemap: every part a full-width band of whole page rows, every page one cell, 65 pages across, and writes `layout.npz`. Add `--preview docs/shots/war-and-peace_layout.png` to render the result with Pillow without opening a window.
+3. `atlas_viewer.py` opens the book fitted to the window. Everything in Controls works except what needs a resolver or a history: `/` filters (`Natasha` finds 1,213 mentions on 299 pages), Enter flies to the next hit, `3` tilts the book into 3D, hover names the part, chapter and page under the cursor. There is no Inspector, no colour lens and no revision rail, since a book has no definitions and no commits.
+
+The README's second image is the viewer scripted from the shell, and the opening pages are one flag away:
+
+```bash
+./atlas_viewer.py data/war-and-peace_atlas --proj 3d --tilt 55 --yaw 12 --goto "p. 481:1" --zoom 3 --frames 2 --no-hover --screenshot hero.png
+./atlas_viewer.py data/war-and-peace_atlas --goto "p. 17:1" --zoom 11
+```
+
+Any Gutenberg plain text works the same way: `--gutenberg N` with its ebook number, or a path to a text file already on disk. A text whose parts and chapters are headed `BOOK`, `PART`, `VOLUME`, `EPILOGUE` or `PROLOGUE` and `CHAPTER` at the start of a line splits as War and Peace does; a text without headings becomes one part named after the corpus, its pages `name/p. 1` onward. `--page-lines` sets the page (52 by default), `--front` names the part before the first heading (`Front matter`), and `--name` the corpus. The text is kept on Gutenberg's own line breaks and normalised to ASCII, so accented names lose their accents and curly quotes come out straight; the Implementation section says exactly what is mapped.
 
 ## Controls
 

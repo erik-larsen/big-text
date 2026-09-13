@@ -171,24 +171,27 @@ def index_page(relpath, lines):
             line_len.astype(np.uint16), line_indent.astype(np.uint16), int((chars != 32).sum()), [])
 
 
-def build(parts, page_lines):
+def build(parts, page_lines, name):
     """dirs, files, file_dir, results in atlas_index's pre-order: the root,
     then each part with its pages. Chapters are not directories, a page's
     path names its chapter (`Book One: 1805/Chapter III/p. 27`), so the
-    layout is a grid of pages per part, as printed."""
+    layout is a grid of pages per part, as printed. A text without any
+    heading is one part named after the corpus, its pages `name/p. N`."""
     dirs = [{"path": "", "parent": -1, "children": [], "files": [], "top": 0}]
     files, file_dir, results = [], [], []
     page_no = 0
+    plain = len(parts) == 1 and len(parts[0][1]) == 1 and parts[0][1][0][0] == ""
     for heading, chapters in parts:
         p = len(dirs)
-        dirs.append({"path": title(heading), "parent": 0, "children": [], "files": [],
-                     "top": p, "label": title(heading)})
+        label = name if plain else title(heading)
+        dirs.append({"path": label, "parent": 0, "children": [], "files": [],
+                     "top": p, "label": label})
         dirs[0]["children"].append(p)
         for ch_heading, lines in chapters:
-            label = title(ch_heading) if ch_heading else "Contents"
+            chapter = "" if plain else "/" + (title(ch_heading) if ch_heading else "Contents")
             for page in pages_of(lines, page_lines):
                 page_no += 1
-                rel = f"{dirs[p]['path']}/{label}/p. {page_no}"
+                rel = f"{dirs[p]['path']}{chapter}/p. {page_no}"
                 dirs[p]["files"].append(len(files))
                 files.append(rel)
                 file_dir.append(p)
@@ -239,7 +242,7 @@ def main():
         text = f.read().decode("utf-8", "replace")
     lines = body_lines(text)
     parts = split_book(lines, args.front)
-    dirs, files, file_dir, results = build(parts, args.page_lines)
+    dirs, files, file_dir, results = build(parts, args.page_lines, args.name)
     skipped = {"binary": 0, "large": 0, "submodules": 0}
     seconds = round(time.time() - t0, 2)
     stats = write_index(args.out, args.name, os.path.abspath(args.text), dirs, files, file_dir,
