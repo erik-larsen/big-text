@@ -9,8 +9,10 @@ subdirectories are squarified inside, biggest first, each file's area its
 weight: tokens for code, lines for a book. A file is split into k equal
 columns so that its text is as large as possible while a column still holds
 the file's typical line length; lines longer than a column wrap inside it.
-A book (index.json "corpus": "book") is laid out in reading order instead,
-parts as bands of page rows, and its layout is flat: nothing rises in 3D.
+A book (index.json "corpus": "book") is laid out in reading order instead:
+one grid of pages, as Dobbie's War and Peace, or with --book-layout parts
+every part its own band of page rows; either way the layout is flat,
+nothing rises in 3D.
 
   ./atlas_layout.py data/big-text_atlas --preview docs/shots/big-text_layout.png
 """
@@ -177,6 +179,37 @@ def book_layout(dirs, world, page_aspect):
             file_rect[f] = (x0 + pp + j * cw, y + pp + i * ch, x0 + pp + (j + 1) * cw, y + pp + (i + 1) * ch)
         y += r * row_h
     return dir_rect, dir_pad, file_rect, cols
+
+
+def book_flow(dirs, world, page_aspect):
+    """Rectangles for a book as one grid: every page one cell of one size,
+    rows filled left to right in reading order across the whole book, the
+    parts not drawn (the layout's tree is the root alone, every page its
+    file; the paths still carry part and chapter). The column count is the
+    one that brings a cell closest to page_aspect from the wide side, so a
+    page's single column holds its lines. Returns (dirs, file_dir,
+    dir_rect, dir_pad, file_rect, cols)."""
+    files = sorted(f for d in dirs for f in d["files"])   # index order is reading order
+    n = len(files)
+    root = dict(dirs[0], children=[], files=files)
+    dir_rect, dir_pad, file_rect = np.zeros((1, 4)), np.zeros(1), np.zeros((n, 4))
+    dir_rect[0] = (0.0, 0.0, world[0], world[1])
+    pad = dir_padding(world[0], world[1])
+    dir_pad[0] = pad
+    x0, y0, x1, y1 = pad, pad, world[0] - pad, world[1] - pad
+    best = None
+    for cols in range(1, max(n, 1) + 1):
+        rows = -(-n // cols)
+        ratio = ((x1 - x0) / cols) / ((y1 - y0) / rows) / page_aspect
+        key = (ratio < 1, abs(math.log(ratio)))
+        if best is None or key < best[0]:
+            best = (key, cols, rows)
+    _, cols, rows = best
+    cw, ch = (x1 - x0) / cols, (y1 - y0) / rows
+    for k, f in enumerate(files):
+        i, j = divmod(k, cols)
+        file_rect[f] = (x0 + j * cw, y0 + i * ch, x0 + (j + 1) * cw, y0 + (i + 1) * ch)
+    return [root], np.zeros(n, np.int64), dir_rect, dir_pad, file_rect, cols
 
 
 # ---------------------------------------------------------------- files
@@ -459,7 +492,13 @@ def build_layout(args, z, meta, t0):
     if flat:
         # a page cell's aspect: the book's line width by its fullest page
         page = (int(meta.get("page_lines", np.diff(file_line0).max())), int(np.percentile(line_len, 99.5)))
-        dir_rect, dir_pad, file_rect, book_cols = book_layout(dirs, world, page[1] * args.char_aspect / (page[0] + 2))
+        aspect_p = page[1] * args.char_aspect / (page[0] + 2)
+        if args.book_layout == "parts":
+            dir_rect, dir_pad, file_rect, book_cols = book_layout(dirs, world, aspect_p)
+        else:
+            dirs, file_dir, dir_rect, dir_pad, file_rect, book_cols = book_flow(dirs, world, aspect_p)
+            n_dirs, dir_hue = 1, np.zeros(1, np.int64)
+            file_hue = np.zeros(n_files, np.int64)
     else:
         dir_rect, dir_pad, file_rect = layout_tree(dirs, weight, file_dir, world, np.diff(file_line0))
     dir_depth = np.zeros(n_dirs, np.int64)
@@ -525,6 +564,9 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("atlas", metavar="ATLAS_DIR", help="data/<name>_atlas with index.npz + index.json")
     ap.add_argument("--aspect", default="16:9", help="world aspect W:H (default 16:9)")
+    ap.add_argument("--book-layout", choices=["flow", "parts"], default="flow",
+                    help="a book: flow (default) is one grid of pages in reading order; parts gives "
+                         "every part its own band of page rows")
     ap.add_argument("--char-aspect", type=float, default=None,
                     help="character advance / line pitch of the font (default: atlas_font.py's "
                          "metric for the bundled font, JetBrains Mono NL 0.571; 0.6 if it is missing)")

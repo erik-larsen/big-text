@@ -79,13 +79,13 @@ def main():
     if failures:
         sys.exit(f"{len(failures)} failures")
 
-    dirs = meta["dirs"]
+    dirs = lay["dirs"]                 # the layout's tree: a book's flow layout keeps the root alone
     n_files, n_dirs, n_items = len(meta["files"]), len(dirs), len(meta["items"])
     n_lines = len(z["line_len"])
-    file_line0, file_dir = z["file_line0"], z["file_dir"]
+    file_line0, file_dir = z["file_line0"], L["file_dir"]
     check(len(z["line_off"]) == n_lines + 1 and int(z["line_off"][-1]) == len(z["chars"]) == len(z["kinds"]),
           f"index: line_off spans {len(z['chars'])} chars, {n_lines} lines")
-    check(len(file_line0) == n_files + 1 and int(file_line0[-1]) == n_lines and len(file_dir) == n_files,
+    check(len(file_line0) == n_files + 1 and int(file_line0[-1]) == n_lines and len(z["file_dir"]) == n_files,
           f"index: {n_files} files cover the lines")
     check((np.diff(file_line0.astype(np.int64)) >= 0).all() and (np.diff(z["line_off"].astype(np.int64)) >= 0).all(),
           "index: file_line0 and line_off are monotonic")

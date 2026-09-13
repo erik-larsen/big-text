@@ -15,6 +15,8 @@ uniform mat4 uMVP;
 uniform vec4 uView;        // world rectangle in view (conservative), for culling
 uniform float uZScale;
 uniform vec3 uHue[12];
+uniform int uBandFlat;     // 1: every band in uBandColor, no inner tint (a scheme's "band")
+uniform vec3 uBandColor;
 out vec2 vWorld;
 flat out vec4 vRect;
 flat out float vPad;
@@ -36,13 +38,14 @@ void main() {
     vWorld = w;
     vRect = rect;
     vPad = meta.x;
-    vColor = uHue[int(meta.z) % 12];
+    vColor = uBandFlat == 1 ? uBandColor : uHue[int(meta.z) % 12];
 }
 // ---- fragment ----
 #version 330 core
 uniform float uZScale;
 uniform float uBandPx;     // the band's greatest width in device pixels
 uniform vec3 uGround;      // the scheme's ground colour, under the terrace tint
+uniform int uBandFlat;
 in vec2 vWorld;
 flat in vec4 vRect;
 flat in float vPad;
@@ -54,7 +57,8 @@ void main() {
                   min(vWorld.y - vRect.y, vRect.w - vWorld.y));
     float px = fwidth(vWorld.x);           // world units per device pixel
     float ring = min(max(vPad, px), uBandPx * px);   // one pixel at least, uBandPx at most
-    if (d < ring) frag = vec4(vColor, uZScale > 0.0 ? 1.0 : 0.55);
-    else          frag = uZScale > 0.0 ? vec4(mix(uGround, vColor, 0.16), 1.0)
-                                       : vec4(vColor * 0.6, 0.16);
+    if (uBandFlat == 1) { if (d >= ring) discard; frag = vec4(vColor, 1.0); }
+    else if (d < ring) frag = vec4(vColor, uZScale > 0.0 ? 1.0 : 0.55);
+    else               frag = uZScale > 0.0 ? vec4(mix(uGround, vColor, 0.16), 1.0)
+                                            : vec4(vColor * 0.6, 0.16);
 }

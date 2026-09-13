@@ -40,8 +40,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from atlas_index import (SPECS, MAX_COLS, TAB, PUNCT, SPACE, _CTRL, tokenize, write_index)  # noqa: E402
 
 # the book's colours, Dobbie's: white pages on his demo's blue-grey ground
-# (its clearColor), black text, dark grey bars; words and numbers alike
-SCHEME = {"ground": "a0a9af", "page": "ffffff", "bar": "5a5e66",
+# (its clearColor), black text, dark grey bars, the bands in the ground's
+# own colour so parts draw nothing; words and numbers alike
+SCHEME = {"ground": "a0a9af", "page": "ffffff", "bar": "5a5e66", "band": "a0a9af",
           "kinds": ["000000", "141414", "141414", "141414", "141414", "3a3a3a", "141414", "4a4a4a", "141414", "141414"],
           "items": ["7aa2f7", "e0c080", "d7a0a8", "5fb7b7", "8c909a"]}
 

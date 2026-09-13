@@ -44,14 +44,14 @@ The line numbers in the `--goto` and `--hover` commands are the ones that held w
 ## The README's opening images
 
 - `big-text/hero.png`: big-text's own source fitted in 3D at tilt 55 and yaw 12 with the heights and the tint on: the most edited files ember, the roofs at the rungs their sizes allow.
-- `war-and-peace/hero.png`: War and Peace in 3D at tilt 55 and yaw 12, 3 px per line about page 481 (Book Five): one flat sheet in perspective, the near pages at the text rung, the far rows at bars, the Books as bands with their labels stacked along the left edge. The README's second image.
+- `war-and-peace/hero.png`: War and Peace in 3D at tilt 55 and yaw 12, 3 px per line about page 481 (Book Five): one flat grid of pages in perspective (a book has no heights), the near pages at the text rung, the far rows at bars. The README's second image.
 - `emscripten/hero.png`: the same on emscripten at 2.2 px per line about `tools/link.py` with the tint on: the near roofs at the tokens and text rungs, the far ones at bars. Not in the README.
 
 ## Layout previews
 
 - `big-text_layout.png`: the layout stage's own render of big-text (29 files, about 7,200 lines): the `docs/`, `tests/` and `shaders/` bands, files as 1 px outlines wrapped into columns, one grey bar per line from indent to length.
 - `emscripten_layout.png`: the same for the whole emscripten tree (11,495 files, 2.80 million lines, 698 directories): nested directory bands in the top-level hue, `test/` and `system/` the largest, big files wrapped into up to 64 columns, tiny files as slivers.
-- `war-and-peace_layout.png`: the book: the front matter, then every Book a full-width band of whole page rows, 65 pages across, one grey bar per line, a chapter's last page short.
+- `war-and-peace_layout.png`: the book: one grid of 1,401 pages in reading order, 58 across, one grey bar per line, a chapter's last page short.
 
 ## big-text (its own source: 29 files, about 7,200 lines)
 
@@ -71,10 +71,10 @@ The whole tree as git tracks it, test suites and system libraries included, at t
 
 In the book's own scheme, Dobbie's: white pages and black text on his demo's blue-grey ground. The standard set with `--filter Natasha` (1,213 hits on 299 pages), a book having no tint, plus:
 
-- `war-and-peace/overview.png`: the map fitted: `Front Matter` on top, then the 15 Books and two epilogues as bands of whole page rows in reading order, each labelled, each page a cell at the line-bars rung, the last row of every Book short.
+- `war-and-peace/overview.png`: the map fitted: one grid of pages in reading order, the front matter's contents pages first, each page a cell at the line-bars rung; no part is drawn, the crumb trail names the one under the centre.
 - `war-and-peace/hover.png`: the text view hovered at the centre: the label `Book Eight: 1811 - 12/Chapter IX/p. 657` (part, chapter, page; a book has no items).
 - `war-and-peace/result.png`: after stepping to the first mention (Book One, Chapter XI, p. 56, line 41), the fly-to at text zoom with the hit filled yellow.
-- `war-and-peace/3d.png`, `3d_zoom.png`: the sheet tilted, nothing extruded: a book's layout is flat whatever the heights setting.
+- `war-and-peace/3d.png`, `3d_zoom.png`: the grid tilted, nothing extruded: a book's layout is flat whatever the heights setting.
 - `war-and-peace/opening.png`: `--goto "p. 17:1" --zoom 11`: the book's first pages, the contents on the front-matter pages above `Book One: 1805` and Chapter I.
 
 ## Frame times

@@ -277,6 +277,7 @@ class Viewer:
         self.bg = rgb(sc["ground"].lstrip("#"))
         self.page = rgb(sc["page"].lstrip("#"))
         self.bar = rgb(sc["bar"].lstrip("#"))
+        self.band = rgb(sc["band"].lstrip("#")) if sc.get("band") else None   # one colour for every band, else the hues
         self.kind_colors = np.array([rgb(h.lstrip("#")) for h in sc["kinds"]], np.float32)
         self.item_colors = {k + 1: rgb(h.lstrip("#")) for k, h in enumerate(sc["items"])}
         if sc.get("font") and args.font == atlas_font.DEFAULT_FONT:
@@ -546,10 +547,14 @@ class Viewer:
             loc = glGetUniformLocation(p, "uKindColor")
             if loc >= 0:
                 glUniform3fv(loc, 10, self.kind_colors)
-            for name, col in (("uPage", self.page), ("uGround", self.bg), ("uBar", self.bar)):
+            for name, col in (("uPage", self.page), ("uGround", self.bg), ("uBar", self.bar),
+                              ("uBandColor", self.band if self.band is not None else self.bg)):
                 loc = glGetUniformLocation(p, name)
                 if loc >= 0:
                     glUniform3f(loc, *col)
+            loc = glGetUniformLocation(p, "uBandFlat")
+            if loc >= 0:
+                glUniform1i(loc, 1 if self.band is not None else 0)
             loc = glGetUniformLocation(p, "uGlyph")
             if loc >= 0:
                 glUniform4f(loc, self.gm["cell_w"], self.gm["cell_h"],
