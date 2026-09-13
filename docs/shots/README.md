@@ -45,7 +45,7 @@ Regenerate everything with:
 - `big-picture/wrapped.png`: `--goto c/stb_image.h:120 --zoom 14`: the credits block's long lines wrapped inside their column, continuation rows hanging in by two characters.
 - `big-picture/text_120_raster.png`: `vt_viewer.py:569` at 120 px per line with `--no-vector-text`, drawn from the 64 px raster atlas: the magnified glyphs are visibly soft.
 - `big-picture/text_120_vector.png`: the same view with the default vector tier: the glyphs are crisp at any magnification.
-- `vt_bench_12.png`, `vt_bench_96.png`: `tests/bench_vt.py --out` evidence: the same string at 12 and 96 px per line rendered by the Slug tier, the old grid tier (from git), the raster tier and the exact coverage, stacked in that order and enlarged.
+- `vt_bench_12.png`, `vt_bench_96.png`: `tests/bench_vt.py --out` evidence from phase 6: the same string at 12 and 96 px per line rendered by the Slug tier, the old grid tier (taken from git before the history rewrite removed it), the raster tier and the exact coverage, stacked in that order and enlarged; a rerun today writes three rows, without the grid.
 
 ## makepad-draw (493 files, 280,607 lines, 10,182,050 chars)
 

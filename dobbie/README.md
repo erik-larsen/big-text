@@ -1,6 +1,6 @@
 # Will Dobbie's GPU text demos
 
-Two WebGL demos by Will Dobbie, copied from his site and verified byte for byte. He never published a repository; the demos are served unminified, so the page source is the source.
+Two WebGL demos by Will Dobbie, fetched from his site by `fetch.sh` and verified by checksum. He never published a repository; the demos are served unminified, so the page source is the source. They are here for study: nothing in big-text's build or tests uses them, since big-text's own vector tier is a translation of Eric Lengyel's MIT reference shader and its raster tier and document layout are written from Dobbie's posts.
 
 | Post | Date | Demo | Here |
 |---|---|---|---|
@@ -8,7 +8,7 @@ Two WebGL demos by Will Dobbie, copied from his site and verified byte for byte.
 | [Implementation notes](https://wdobbie.com/post/gpu-text-rendering-with-vector-textures-details/) | 2016 | same demo | |
 | [War and Peace and WebGL](https://wdobbie.com/post/war-and-peace-and-webgl/) | 2016-01-21 | [wdobbie.com/warandpeace/](https://wdobbie.com/warandpeace/) (1273 pages, 2.7 million glyphs) | `warandpeace/` |
 
-A third-party mirror of the War and Peace demo exists at github.com/amilajack/webgl-sdf-demo (2021). Its files are byte-identical to the live site except for whitespace in index.html; its package.json says MIT, but that is the mirror author's claim, not Dobbie's. The copies here were taken from wdobbie.com directly on 2026-09-12.
+A third-party mirror of the War and Peace demo exists at github.com/amilajack/webgl-sdf-demo (2021). Its files are byte-identical to the live site except for whitespace in index.html; its package.json says MIT, but that is the mirror author's claim, not Dobbie's. The checksums below were taken from wdobbie.com directly on 2026-09-12.
 
 ## Files
 

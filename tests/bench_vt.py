@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""The phase 6 measurement: the vector tier on Slug (the tree) against the
-vector tier it replaced (the Dobbie-style grid, taken from git so nothing of
-it lives in the tree) and against the raster tier (the 64 px mipmapped
-atlas sampled as line.glsl does at the text rung), on the default face, at
-12, 32, 96 and 300 device pixels per line. Per contender and size:
+"""The vector tier measurement: the Slug tier against the raster tier (the
+64 px mipmapped atlas sampled as line.glsl does at the text rung), on the
+default face, at 12, 32, 96 and 300 device pixels per line. The phase 6 run
+also measured the Dobbie-style grid tier the Slug tier replaced, taken from
+git; that history was rewritten before publication and the port is gone, so
+the grid numbers survive only in the README's table. Per contender and size:
 
   error    mean absolute coverage difference against the exact coverage of
            the same string in the same cells: Pillow's rasterisation at eight
@@ -21,22 +22,17 @@ atlas sampled as line.glsl does at the text rung), on the default face, at
            for a 0.1 px shift; the mean over pairs and the maximum
 
 Prints a Markdown table for the README and applies the two rules from
-docs/DESIGN.md: VT_MIN_PPL is the smallest tested size at which the new
+docs/DESIGN.md: VT_MIN_PPL is the smallest tested size at which the Slug
 tier's ink error is at or below the raster tier's (64 when none is), and
-vector text is on by default when the new tier's time per screen at that
-size is at most twice the raster tier's. It also says whether Slug replaces
-the old tier under the contract's rule (no worse on error and sparkle at
-every size, no more than a tenth slower).
+vector text is on by default when the Slug tier's time per screen at that
+size is at most twice the raster tier's.
 
-    ./tests/bench_vt.py [--font F] [--index I] [--old a366a85] [--out DIR]
+    ./tests/bench_vt.py [--font F] [--index I] [--out DIR] [--sizes 12,32,96,300]
 """
 import argparse
 import ctypes
-import importlib.util
 import os
-import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 
@@ -90,18 +86,6 @@ float vt_coverage(int code, vec2 uv, vec2 gdx, vec2 gdy) {
 }
 float vt_coverage(int code, vec2 uv) { return vt_coverage(code, uv, dFdx(uv), dFdy(uv)); }
 """
-
-
-def old_tier(commit, tmp):
-    """The previous vector tier's module and shader from git."""
-    for name in ("vt_glyphs.py", "shaders/vt_glyph.glsl"):
-        src = subprocess.run(["git", "-C", str(ROOT), "show", f"{commit}:{name}"], check=True,
-                             capture_output=True, text=True).stdout
-        (tmp / Path(name).name).write_text(src)
-    spec = importlib.util.spec_from_file_location("vt_glyphs_old", tmp / "vt_glyphs.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod, (tmp / "vt_glyph.glsl").read_text()
 
 
 class Contender:
@@ -175,7 +159,6 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--font", default=vt_glyphs.DEFAULT_FONT)
     ap.add_argument("--index", type=int, default=0)
-    ap.add_argument("--old", default="a366a85", help="commit holding the previous vector tier")
     ap.add_argument("--out", default=None, help="directory for the rendered PNGs")
     ap.add_argument("--min-ppl", type=float, default=12.0, help="the new tier's band widening")
     ap.add_argument("--max-bands", type=int, default=vt_glyphs.MAX_BANDS, help="the new tier's band count ceiling")
@@ -215,12 +198,6 @@ def main():
     new_glsl = (ROOT / "shaders" / "vt_glyph.glsl").read_text()
     contenders = [Contender("slug", compile_program(VERT, FRAG_HEAD + new_glsl + FRAG_MAIN),
                             [("vt_curves", tc), ("vt_bands", tb)], metrics["char_aspect"])]
-    # the old tier, from git
-    with tempfile.TemporaryDirectory() as tmp:
-        old, old_glsl = old_tier(args.old, Path(tmp))
-        atlas, table, om = old.build_atlas(args.font, args.index, 12, box=box, verbose=True)
-        contenders.append(Contender("grid", compile_program(VERT, FRAG_HEAD + old_glsl + FRAG_MAIN),
-                                    [("vt_atlas", old.make_texture(atlas))], om["char_aspect"]))
     # the raster tier
     glyphs, gm = atlas_font.build_atlas(args.font, args.index, 64)
     rt = glGenTextures(1)
@@ -281,12 +258,12 @@ def main():
         fbo.delete()
         if out:
             Image.fromarray((ref * 255 + 0.5).astype(np.uint8)).save(out / f"exact_{px}.png")
-            # the four renders stacked and enlarged, as evidence
+            # the renders stacked and enlarged, as evidence
             scale = max(1, 72 // px)
-            imgs = [Image.open(out / f"{n}_{px}.png") for n in ("slug", "grid", "raster")] + [Image.open(out / f"exact_{px}.png")]
+            imgs = [Image.open(out / f"{n}_{px}.png") for n in ("slug", "raster")] + [Image.open(out / f"exact_{px}.png")]
             w0, h0 = imgs[0].size
             w1 = min(w0, 2000 // scale)
-            stack = Image.new("L", (w1 * scale, (h0 * 4 + 12) * scale), 40)
+            stack = Image.new("L", (w1 * scale, (h0 * 3 + 8) * scale), 40)
             for i, im in enumerate(imgs):
                 stack.paste(im.crop((0, 0, w1, h0)).resize((w1 * scale, h0 * scale), Image.NEAREST), (0, (h0 + 4) * i * scale))
             stack.save(out / f"stack_{px}.png")
@@ -296,7 +273,7 @@ def main():
     print("\n| px per line | tier | error, all | error, ink | ms per screen | cells per screen | sparkle mean | sparkle max |")
     print("|---|---|---|---|---|---|---|---|")
     for px in sizes:
-        for name in ("slug", "grid", "raster"):
+        for name in ("slug", "raster"):
             r = results[(name, px)]
             print(f"| {px} | {name} | {r['err_all']:.4f} | {r['err_ink']:.4f} | {r['ms']:.2f} | {r['cells']} | "
                   f"{r['sparkle_mean']:.1f} | {r['sparkle_max']} |")
@@ -306,24 +283,10 @@ def main():
     vt_min = handoff if handoff is not None else 64
     ref_px = handoff if handoff is not None else sizes[-1]
     default_on = results[("slug", ref_px)]["ms"] <= 2.0 * results[("raster", ref_px)]["ms"]
-    def wins(px):
-        s, g = results[("slug", px)], results[("grid", px)]
-        return (s["err_ink"] <= g["err_ink"] + 1e-9, s["sparkle_mean"] <= g["sparkle_mean"] + 1e-9, s["ms"] <= 1.1 * g["ms"])
-    replaces = all(all(wins(px)) for px in sizes)
-    served = [px for px in sizes if px >= vt_min]
-    replaces_served = all(all(wins(px)) for px in served) if served else False
-    for px in sizes:
-        e, sp, t = wins(px)
-        print(f"  {px:4d} px: slug vs grid  error {'ok' if e else 'WORSE'}  sparkle {'ok' if sp else 'WORSE'}  "
-              f"time {'ok' if t else 'SLOWER'} ({results[('slug', px)]['ms'] / max(results[('grid', px)]['ms'], 1e-9):.2f}x)")
     print(f"\nVT_MIN_PPL = {vt_min} (the smallest tested size where slug's ink error <= raster's"
           f"{'' if handoff else '; none did, so the raster atlas cell size'})")
     print(f"vector text {'on' if default_on else 'off'} by default (slug {results[('slug', ref_px)]['ms']:.2f} ms vs raster "
           f"{results[('raster', ref_px)]['ms']:.2f} ms per screen at {ref_px} px; the rule is at most twice)")
-    print(f"slug {'replaces' if replaces else 'does NOT replace'} the grid tier under the contract's rule "
-          f"(no worse on ink error and sparkle at every size, at most a tenth slower); "
-          f"over the sizes the tier serves ({', '.join(str(p) for p in served) or 'none'}): "
-          f"{'replaces' if replaces_served else 'does NOT replace'}")
 
 
 if __name__ == "__main__":
