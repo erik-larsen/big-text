@@ -5,3 +5,6 @@ __pycache__/
 .venv/
 .DS_Store
 .claude/
+
+# the vector-tier test writes its renders here
+data/vt_test/
