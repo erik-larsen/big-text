@@ -21,6 +21,7 @@ Controls: wheel = zoom about the cursor (with a glide) | drag = pan
           Enter, Down, ] = next hit | Up, [ = previous hit
           click a hit in the panel = fly there | Escape = clear the filter
           3 = the tilted projection on and off | Alt-drag = tilt and turn
+          H = the heights on and off in 3D (files rise by their weight)
           C = the tint on and off, when the corpus has one
 """
 import argparse
@@ -275,9 +276,10 @@ class Viewer:
         self.tint_on = self.tint is not None and bool(getattr(args, "tint", False))
         self.hang = int(a["layout"].get("hang", 2))
         # projection: 2d is orthographic; 3d is a perspective camera that
-        # orbits the focus point (cx, cy) at tilt and yaw, with files and
-        # directories extruded by their weight
+        # orbits the focus point (cx, cy) at tilt and yaw; with the heights
+        # on, files and directories are extruded by their weight
         self.proj = getattr(args, "proj", None) or "2d"
+        self.heights = bool(getattr(args, "heights", False))
         self.tilt = float(getattr(args, "tilt", None) if getattr(args, "tilt", None) is not None
                           else (55.0 if self.proj == "3d" else 0.0))
         self.yaw = float(getattr(args, "yaw", None) or 0.0)
@@ -380,11 +382,11 @@ class Viewer:
         """z base and height per file and directory from the layout's
         weight: directories are terraces of DIR_STEP per level, files sit on
         their directory's terrace with a height of H_MAX * sqrt(weight /
-        max). A flat layout (a book) has no heights at all: its 3D view is
-        the sheet tilted, nothing extruded."""
+        max). With the heights off (the default), or for a flat layout (a
+        book), nothing rises: the 3D view is the sheet tilted."""
         a = self.a
         depth = a["dir_depth"].astype(np.float64)
-        flat = bool(a["layout"].get("flat", False))
+        flat = bool(a["layout"].get("flat", False)) or not self.heights
         self.dir_z0 = np.maximum(depth - 1, 0) * (0.0 if flat else DIR_STEP)
         self.dir_h = np.where(depth >= 1, 0.0 if flat else DIR_STEP, 0.0)
         top = self.dir_z0 + self.dir_h
@@ -397,6 +399,17 @@ class Viewer:
             self.file_h[:] = 0.0
         self.file_z0 = top[a["file_dir"]]
         self.file_top = self.file_z0 + self.file_h
+
+    def set_heights(self, on):
+        """The heights on or off: recompute and re-upload the file and
+        directory textures (a small upload; the lines are untouched)."""
+        if bool(self.a["layout"].get("flat", False)) or on == self.heights:
+            return
+        self.heights = bool(on)
+        self.compute_heights()
+        self.upload_layout()
+        self.bind_textures()
+        self.hover = None
 
     def set_tint(self, on):
         if self.tint is None:
@@ -1003,6 +1016,8 @@ class Viewer:
             self.step(-1)
         elif key == glfw.KEY_C:
             self.set_tint(not self.tint_on)
+        elif key == glfw.KEY_H:
+            self.set_heights(not self.heights)
         elif key == glfw.KEY_R:
             self.fit()
         elif key == glfw.KEY_3:
@@ -1819,8 +1834,8 @@ class Viewer:
     def run_shots(self):
         """--shots DIR: the standard set. The fitted map, the rungs at 2,
         4.5 and 16 px per line, the hover label, the filter and its first
-        hit, the 3D projection fitted and close, and the tint when the
-        corpus has one."""
+        hit, the 3D projection with the heights on, fitted and close, and
+        the tint when the corpus has one."""
         out = Path(self.args.shots)
         out.mkdir(parents=True, exist_ok=True)
         word = self.args.filter
@@ -1852,7 +1867,9 @@ class Viewer:
             self.goto_result((self.args.step or 1) - 1, complete=True)
         snap("result.png")
         self.set_filter("")
-        # the 3D projection: the whole map tilted, then a close pass
+        # the 3D projection with the heights on: the whole map tilted, then a close pass
+        heights = self.heights
+        self.set_heights(True)
         self.tilt, self.yaw = 55.0, 12.0
         self.set_proj("3d")
         self.fit()
@@ -1860,6 +1877,7 @@ class Viewer:
         self.set_zoom_ppl(3.0, centre)
         snap("3d_zoom.png")
         self.set_proj("2d")
+        self.set_heights(heights)
         if self.tint is not None:
             self.set_tint(True)
             self.fit()
@@ -1946,6 +1964,8 @@ def main():
     ap.add_argument("--proj", default=None, choices=["2d", "3d"],
                     help="start in 2D (default) or the tilted 3D projection; 3 toggles, Alt-drag tilts")
     ap.add_argument("--tilt", type=float, default=None, help="3D tilt in degrees (default 55)")
+    ap.add_argument("--heights", action="store_true",
+                    help="start with the 3D heights on: files rise by their weight, directories are terraces; H toggles them")
     ap.add_argument("--yaw", type=float, default=None, help="3D turn in degrees (default 0)")
     ap.add_argument("--tint", action="store_true",
                     help="start with the tint on, when the index has one; C toggles it")

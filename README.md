@@ -4,7 +4,7 @@ big-text is the text-scale sibling of [big-picture](https://github.com/erik-lars
 
 ![big-text's own source in 3D, the tint colouring the most edited files ember](docs/shots/big-text/hero.png)
 
-*big-text viewing itself: 29 files and about 7,200 lines tilted into 3D with the tint on, the most edited files ember, every roof carrying its code at the rung its size allows.*
+*big-text viewing itself: 29 files and about 7,200 lines tilted into 3D with the heights and the tint on, the most edited files ember, every roof carrying its code at the rung its size allows.*
 
 ![War and Peace tilted at 3 pixels per line: one flat sheet of pages, the near ones as text, the far rows as line bars, the Books as coloured bands](docs/shots/war-and-peace/hero.png)
 
@@ -109,7 +109,7 @@ git clone https://github.com/emscripten-core/emscripten.git ../emscripten
 ./atlas_viewer.py data/emscripten_atlas
 ```
 
-Glyphs from 12 device pixels per line come from the vector tier by default, crisp at any magnification; the first run builds its curve and band textures in a tenth of a second and caches them under `data/`, and `--no-vector-text` keeps the raster atlas at every size. `--goto path:line`, `--zoom PX_PER_LINE`, `--filter WORD`, `--step K`, `--proj 3d --tilt DEG --yaw DEG`, `--tint`, `--hover PATH:LINE:COL`, `--frames N --screenshot out.png`, `--shots DIR` and `--stats` script the viewer for screenshots and timing; `docs/shots/README.md` lists the commands that made every image here.
+Glyphs from 12 device pixels per line come from the vector tier by default, crisp at any magnification; the first run builds its curve and band textures in a tenth of a second and caches them under `data/`, and `--no-vector-text` keeps the raster atlas at every size. `--goto path:line`, `--zoom PX_PER_LINE`, `--filter WORD`, `--step K`, `--proj 3d --tilt DEG --yaw DEG`, `--heights`, `--tint`, `--hover PATH:LINE:COL`, `--frames N --screenshot out.png`, `--shots DIR` and `--stats` script the viewer for screenshots and timing; `docs/shots/README.md` lists the commands that made every image here.
 
 ### The book
 
@@ -143,8 +143,9 @@ Any Gutenberg plain text works the same way: `--gutenberg N` with its ebook numb
 | Hover | Light fill on the file, a label with path, line and enclosing item |
 | `/` or click the box | Type a filter: every file with a hit gets a yellow border, the rest dim, the panel lists the hits by file |
 | `Enter` `]` `Down` / `[` `Up` | Fly to the next / previous hit; clicking a hit in the panel flies to it |
-| `3` | The tilted projection on and off: files and directories extruded by their weight |
+| `3` | The tilted projection on and off: the sheet in perspective, the near files at text and the far ones at bars |
 | `Alt` + drag | Tilt (vertical) and turn (horizontal) the 3D camera; from 2D it switches to 3D |
+| `H` | The heights on and off in 3D: files rise by their weight, directories are terraces; off by default |
 | `C` | The tint on and off, when the corpus has one: for code, lines added and removed over the git history, in ember |
 | `R` | Refit the map |
 | `Escape` | Clear the filter |
@@ -168,7 +169,7 @@ The filter `Viewer`: the five files that mention it outlined in yellow, the rest
 ![filter](docs/shots/big-text/filter.png)
 ![result](docs/shots/big-text/result.png)
 
-The 3D projection: the heaviest files as the tallest buildings, directories as terraces, the ladder still drawn on every roof so the near rows are text and the far rows are bars.
+The 3D projection with the heights on: the heaviest files as the tallest buildings, directories as terraces, the ladder still drawn on every roof so the near rows are text and the far rows are bars.
 
 ![3D](docs/shots/big-text/3d.png)
 ![3D close](docs/shots/big-text/3d_zoom.png)
@@ -213,7 +214,7 @@ How each stage is built is in [docs/DESIGN.md](docs/DESIGN.md). The short versio
 - **Glyphs.** `atlas_font.py` rasterises the 95 printable ASCII glyphs of one monospace face into a mipmapped atlas that also draws the UI; the line box is the face's ASCII ink extents rather than its OS/2 box, so a change of face does not change the proportions of the layout. `vt_glyphs.py` builds the vector tier's data in Slug's form: quadratic outlines from fontTools as float32 control points in a curve texture, and per glyph horizontal and vertical bands over its ink box, each listing the curves that cross it sorted for the shader's early exit. `shaders/vt_glyph.glsl` is a GLSL translation of the reference pixel shader: the sign-bit root rule, two axis rays with a box filter, the weighted combination.
 - **Filter.** A whole-word regex over the corpus in a thread, chunked so the frame loop keeps running, with mentions inside comments and strings excluded. The panel lists the hits by file with the line each sits on, the status line counts hits and files, and stepping flies from one to the next.
 - **Fly-to** is van Wijk and Nuij's smooth zoom-and-pan, which zooms out and back in between distant places.
-- **3D.** Every world shader takes one model-view-projection matrix, orthographic in 2D and perspective in 3D, so the flat view is unchanged. The camera orbits a focus point at tilt and yaw, at a distance chosen so one world unit at the focus is the same number of pixels as in 2D, which keeps the zoom semantics and the per-file rung: a file's pixels per line is foreshortened by its depth, so one frame has text near and bars far. Directories are terraces, files rise from their terrace by the square root of their weight, an instanced wall pass draws the sides shaded by which way they face, and the focus height rides on the roof of the file under the centre so a close camera never ends up inside a building. A layout can declare itself flat, as the book's does, and then the tilt is only a way of looking at the sheet.
+- **3D.** Every world shader takes one model-view-projection matrix, orthographic in 2D and perspective in 3D, so the flat view is unchanged. The camera orbits a focus point at tilt and yaw, at a distance chosen so one world unit at the focus is the same number of pixels as in 2D, which keeps the zoom semantics and the per-file rung: a file's pixels per line is foreshortened by its depth, so one frame has text near and bars far. By default nothing rises and the tilt is only a way of looking at the sheet; with the heights on (`H`, `--heights`) directories are terraces, files rise from their terrace by the square root of their weight, an instanced wall pass draws the sides shaded by which way they face, and the focus height rides on the roof of the file under the centre so a close camera never ends up inside a building. A layout can declare itself flat, as the book's does, and then the heights stay off.
 - **The window.** The map's viewport is the window minus a top strip (the filter box), a bottom strip (crumb trail and status) and the right column while the panel is open, so the fitted map is clear of every control. The window is sized to the screen's work area explicitly, which makes the framebuffer the same in every run and the screenshots reproducible.
 
 Measured on an M4 MacBook at a 2940 by 1640 framebuffer, `--frames 300 --stats` over the scripted zoom from fit to text: big-text 1.4 ms mean and 3.9 ms 99th percentile; emscripten 5.5 and 25 ms, the tail being the fitted view where all 2.8 million lines are visible, and 3.3 ms once zoomed to text.

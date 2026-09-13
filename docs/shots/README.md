@@ -14,13 +14,13 @@ Regenerate everything with:
 ./atlas_viewer.py data/big-text_atlas --shots docs/shots/big-text --filter Viewer --stats
 ./atlas_viewer.py data/emscripten_atlas --shots docs/shots/emscripten --filter EM_JS --stats
 ./atlas_viewer.py data/war-and-peace_atlas --shots docs/shots/war-and-peace --filter Natasha --stats
-./atlas_viewer.py data/big-text_atlas --proj 3d --tilt 55 --yaw 12 --tint --frames 1 --no-hover --screenshot docs/shots/big-text/hero.png
-./atlas_viewer.py data/big-text_atlas --proj 3d --tilt 55 --yaw 12 --hover atlas_index.py:169:5 --frames 2 --screenshot docs/shots/big-text/3d_text.png
+./atlas_viewer.py data/big-text_atlas --proj 3d --heights --tilt 55 --yaw 12 --tint --frames 1 --no-hover --screenshot docs/shots/big-text/hero.png
+./atlas_viewer.py data/big-text_atlas --proj 3d --heights --tilt 55 --yaw 12 --hover atlas_index.py:169:5 --frames 2 --screenshot docs/shots/big-text/3d_text.png
 ./atlas_viewer.py data/big-text_atlas --goto README.md:62 --zoom 14 --frames 2 --screenshot docs/shots/big-text/wrapped.png
 ./atlas_viewer.py data/big-text_atlas --goto atlas_viewer.py:266 --zoom 120 --frames 3 --screenshot docs/shots/big-text/text_120_raster.png --no-vector-text
 ./atlas_viewer.py data/big-text_atlas --goto atlas_viewer.py:266 --zoom 120 --frames 3 --screenshot docs/shots/big-text/text_120_vector.png
-./atlas_viewer.py data/emscripten_atlas --proj 3d --tilt 55 --yaw 12 --tint --goto tools/link.py:1500 --zoom 2.2 --frames 2 --screenshot docs/shots/emscripten/hero.png
-./atlas_viewer.py data/emscripten_atlas --proj 3d --tilt 55 --yaw 12 --hover emcc.py:199:5 --frames 2 --screenshot docs/shots/emscripten/3d_text.png
+./atlas_viewer.py data/emscripten_atlas --proj 3d --heights --tilt 55 --yaw 12 --tint --goto tools/link.py:1500 --zoom 2.2 --frames 2 --screenshot docs/shots/emscripten/hero.png
+./atlas_viewer.py data/emscripten_atlas --proj 3d --heights --tilt 55 --yaw 12 --hover emcc.py:199:5 --frames 2 --screenshot docs/shots/emscripten/3d_text.png
 ./atlas_viewer.py data/war-and-peace_atlas --proj 3d --tilt 55 --yaw 12 --goto "p. 481:1" --zoom 3 --frames 2 --no-hover --screenshot docs/shots/war-and-peace/hero.png
 ./atlas_viewer.py data/war-and-peace_atlas --goto "p. 17:1" --zoom 11 --frames 2 --no-hover --screenshot docs/shots/war-and-peace/opening.png
 ```
@@ -38,12 +38,12 @@ The line numbers in the `--goto` and `--hover` commands are the ones that held w
 - `hover.png`: the text view with the cursor at the window centre: the hovered file's light fill and label.
 - `filter.png`: the fitted map with the `--filter` word applied: every hit file outlined in yellow, the rest dimmed, the panel listing the hits by file, the status line counting them.
 - `result.png`: after stepping to the first hit: the fly-to landed at the text rung with the hit filled yellow, the file's 3 px border, the row highlighted in the panel.
-- `3d.png`, `3d_zoom.png`: the 3D projection at tilt 55 and yaw 12, fitted and at 3 px per line about the centre.
+- `3d.png`, `3d_zoom.png`: the 3D projection with the heights on, at tilt 55 and yaw 12, fitted and at 3 px per line about the centre.
 - `<label>.png`, when the corpus has a tint (`churn.png` for code): the fitted map with the tint on.
 
 ## The README's opening images
 
-- `big-text/hero.png`: big-text's own source fitted in 3D at tilt 55 and yaw 12 with the tint on: the most edited files ember, the roofs at the rungs their sizes allow.
+- `big-text/hero.png`: big-text's own source fitted in 3D at tilt 55 and yaw 12 with the heights and the tint on: the most edited files ember, the roofs at the rungs their sizes allow.
 - `war-and-peace/hero.png`: War and Peace in 3D at tilt 55 and yaw 12, 3 px per line about page 481 (Book Five): one flat sheet in perspective, the near pages at the text rung, the far rows at bars, the Books as bands with their labels stacked along the left edge. The README's second image.
 - `emscripten/hero.png`: the same on emscripten at 2.2 px per line about `tools/link.py` with the tint on: the near roofs at the tokens and text rungs, the far ones at bars. Not in the README.
 
@@ -57,7 +57,7 @@ The line numbers in the `--goto` and `--hover` commands are the ones that held w
 
 The default example, so the counts move whenever this documentation is edited. The standard set with `--filter Viewer` (14 hits in 5 files), plus:
 
-- `big-text/3d_text.png`: `--proj 3d --hover atlas_index.py:169:5`: text zoom on a roof in perspective with the hover label `atlas_index.py:169 def tokenize`.
+- `big-text/3d_text.png`: `--proj 3d --heights --hover atlas_index.py:169:5`: text zoom on a roof in perspective with the hover label `atlas_index.py:169 def tokenize`.
 - `big-text/wrapped.png`: `--goto README.md:62 --zoom 14`: this README's longest paragraph wrapped inside its column, continuation rows hanging in by two characters.
 - `big-text/text_120_raster.png`: `class Viewer` at 120 px per line with `--no-vector-text`, drawn from the 64 px raster atlas: the magnified glyphs are visibly soft.
 - `big-text/text_120_vector.png`: the same view with the default vector tier: the glyphs are crisp at any magnification.
@@ -65,7 +65,7 @@ The default example, so the counts move whenever this documentation is edited. T
 
 ## emscripten (11,495 files, 2,800,173 lines, 91.7 million chars)
 
-The whole tree as git tracks it, test suites and system libraries included, at the commit cloned. The standard set with `--filter EM_JS` (126 hits in 53 files, grouped by file), plus `3d_text.png` (`--proj 3d --hover emcc.py:199:5`, text zoom on a roof in perspective with the hover label `emcc.py:199 def main`) and `churn.png` (the tint over 30,274 commits: every file's fill ember by the log of its lines added and removed, the vendored test suites under `test/third_party` the brightest, having landed whole).
+The whole tree as git tracks it, test suites and system libraries included, at the commit cloned. The standard set with `--filter EM_JS` (126 hits in 53 files, grouped by file), plus `3d_text.png` (`--proj 3d --heights --hover emcc.py:199:5`, text zoom on a roof in perspective with the hover label `emcc.py:199 def main`) and `churn.png` (the tint over 30,274 commits: every file's fill ember by the log of its lines added and removed, the vendored test suites under `test/third_party` the brightest, having landed whole).
 
 ## War and Peace (Project Gutenberg 2600: 18 parts, 366 chapters, 1,401 pages, 63,191 lines, 2.63 million glyphs)
 
@@ -74,7 +74,7 @@ The standard set with `--filter Natasha` (1,213 hits on 299 pages), a book havin
 - `war-and-peace/overview.png`: the map fitted: `Front Matter` on top, then the 15 Books and two epilogues as bands of whole page rows in reading order, each labelled, each page a cell at the line-bars rung, the last row of every Book short.
 - `war-and-peace/hover.png`: the text view hovered at the centre: the label `Book Eight: 1811 - 12/Chapter IX/p. 657` (part, chapter, page; a book has no items).
 - `war-and-peace/result.png`: after stepping to the first mention (Book One, Chapter XI, p. 56, line 41), the fly-to at text zoom with the hit filled yellow.
-- `war-and-peace/3d.png`, `3d_zoom.png`: the sheet tilted, nothing extruded.
+- `war-and-peace/3d.png`, `3d_zoom.png`: the sheet tilted, nothing extruded: a book's layout is flat whatever the heights setting.
 - `war-and-peace/opening.png`: `--goto "p. 17:1" --zoom 11`: the book's first pages, the contents on the front-matter pages above `Book One: 1805` and Chapter I.
 
 ## Frame times
