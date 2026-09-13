@@ -2,7 +2,7 @@
 """Drives atlas_viewer's input callbacks without a human: wheel zoom keeps
 the world point under the cursor fixed and glides to a stop, drag pans the
 map with the cursor, the filter box takes typed text and finds hits,
-stepping flies to a result at the text rung, Escape clears, R refits, and
+stepping flies to a result at the text LOD, Escape clears, R refits, and
 --goto lands on the file. Exit code non-zero on failure.
 
     ./tests/test_viewer_input.py [data/synthetic_atlas]
@@ -70,13 +70,13 @@ def main():
     check(abs(p1[0] - p0[0]) < 1e-9 and abs(p1[1] - p0[1]) < 1e-9,
           f"drag keeps the grabbed point under the cursor {p0} -> {p1}")
 
-    # hover on a file at the text rung gives a label with a line number
+    # hover on a file at the text LOD gives a label with a line number
     v.fit()
     v.set_zoom_ppl(16.0, (v.W / 2, v.H / 2))
     v.on_cursor(w, v.fb_w / 2 / v.px, v.fb_h / 2 / v.px)
     frames(v, 2)
     lab = v.hover_label()
-    check(lab is not None and ":" in lab, f"hover label at text rung: {lab!r}")
+    check(lab is not None and ":" in lab, f"hover label at text LOD: {lab!r}")
     check(v.crumb.startswith("at ") and "›" in v.crumb, f"crumb trail: {v.crumb!r}")
 
     # filter: '/' focuses, typed chars search in a thread, results arrive
@@ -115,7 +115,7 @@ def main():
     v.update_file_flags()
     v.fit()
 
-    # Enter steps to the first result and flies there; the fly ends at text rung
+    # Enter steps to the first result and flies there; the fly ends at text LOD
     v.on_key(w, glfw.KEY_ENTER, 0, glfw.PRESS, 0)
     check(v.result_i == 0 and v.fly is not None, "Enter steps to result 1 and starts a fly-to")
     t0 = time.perf_counter()
@@ -126,7 +126,7 @@ def main():
     row, _ = v.row_of(line, col)
     lx, ly = v.a["row_pos"][int(row[0])]
     check(x0 <= lx <= x1 and y0 <= ly <= y1, "fly-to ended with the hit line in view")
-    check(v.rung[f] == 3, f"hit file at the text rung after the fly (rung {v.rung[f]})")
+    check(v.lod[f] == 3, f"hit file at the text LOD after the fly (LOD {v.LOD[f]})")
     check(v.current_file == f, "current result file flagged")
     v.on_key(w, glfw.KEY_UP, 0, glfw.PRESS, 0)
     check(v.result_i == len(v.results["order"]) - 1, "Up wraps to the last result")
@@ -141,15 +141,15 @@ def main():
     v.on_key(w, glfw.KEY_R, 0, glfw.PRESS, 0)
     check(abs(v.zoom - v.fit_zoom()) < 1e-12 and v.cx == v.W / 2, "R resets the view")
 
-    # --goto path:line lands on the line at the text rung
+    # --goto path:line lands on the line at the text LOD
     path = v.paths[len(v.paths) // 2]
     v.goto(f"{path}:5", complete=True)
     frames(v, 1)
     f = v.paths.index(path)
     x0, y0, x1, y1 = v.view()
     r = v.a["file_rect"][f]
-    check(x0 < r[2] and x1 > r[0] and y0 < r[3] and y1 > r[1] and v.rung[f] == 3,
-          f"--goto {path}:5 shows the file at rung {v.rung[f]}")
+    check(x0 < r[2] and x1 > r[0] and y0 < r[3] and y1 > r[1] and v.lod[f] == 3,
+          f"--goto {path}:5 shows the file at LOD {v.LOD[f]}")
 
     # zoom limits hold
     v.on_cursor(w, cx, cy)

@@ -1,12 +1,12 @@
 // glyph.glsl: one instanced quad per character, for a proportional face at
-// the tokens and text rungs (the line shader keeps the bars, and every rung
+// the tokens and text LODs (the line shader keeps the bars, and every LOD
 // of a monospace face). Instance i is character uBase + i of the corpus:
 // tex_char_f (RG32F: its row, its x within the row in line heights) gives
 // the row, tex_line_f the row's position, tex_line_u the file, tex_file_u
-// the file's rung and flags, tex_file_f its pitch and height; uAdv holds
+// the file's LOD and flags, tex_file_f its pitch and height; uAdv holds
 // the face's advances in line heights. Spaces, rows outside the view and
-// files below the tokens rung become a degenerate quad. The fragment
-// shader draws a block in the kind colour at rung 2 and the glyph at rung
+// files below the tokens LOD become a degenerate quad. The fragment
+// shader draws a block in the kind colour at LOD 2 and the glyph at LOD
 // 3, from the raster atlas (the glyph drawn from the left of a cell as
 // wide as the widest advance) or, from uVtMin, the vector tier, whose
 // glyph space is the glyph's own advance box.
@@ -29,7 +29,7 @@ uniform int uBase;
 out vec2 vUV;
 flat out int vCode;
 flat out int vKind;
-flat out ivec2 vRF;         // rung, flags
+flat out ivec2 vRF;         // LOD, flags
 flat out float vPpl;
 
 ivec2 tc(int i) { return ivec2(i & 4095, i >> 12); }
@@ -45,7 +45,7 @@ void main() {
     uvec4 lu = texelFetch(uLineU, tc(row), 0);
     int f = int(lu.y);
     uvec4 fu = texelFetch(uFileU, tc(f), 0);
-    int rung = int(fu.x);
+    int lod = int(fu.x);
     vec4 meta = texelFetch(uFileF, tc(3 * f + 1), 0);
     vec4 zz = texelFetch(uFileF, tc(3 * f + 2), 0);
     float p = meta.x;
@@ -54,13 +54,13 @@ void main() {
     vec2 p0 = lf.xy + vec2(cf.y * p, 0.0);
     vec2 p1 = p0 + vec2(adv * p, p);
     // no early return: every output is written on every path
-    bool kill = kind == 0 || rung < 2 || p1.x < uView.x || p0.x > uView.z || p1.y < uView.y || p0.y > uView.w;
+    bool kill = kind == 0 || lod < 2 || p1.x < uView.x || p0.x > uView.z || p1.y < uView.y || p0.y > uView.w;
     float z = (zz.x + zz.y) * uZScale + 0.04;
     gl_Position = kill ? vec4(-2.0, -2.0, 0.0, 1.0) : uMVP * vec4(mix(p0, p1, aQuad), z, 1.0);
     vUV = aQuad;
     vCode = code;
     vKind = kind;
-    vRF = ivec2(rung, int(fu.y));
+    vRF = ivec2(lod, int(fu.y));
     vPpl = p * uScale * uFocusW / max(gl_Position.w, 1e-6);
 }
 // ---- fragment ----
@@ -81,11 +81,11 @@ flat in float vPpl;
 out vec4 frag;
 
 void main() {
-    int rung = vRF.x, flags = vRF.y;
+    int lod = vRF.x, flags = vRF.y;
     float dim = (flags & 8) != 0 ? 0.45 : 1.0;
     vec3 kc = uKindColor[vKind % 10] * dim;
     float barf = max(0.7, min(1.0, 1.0 / vPpl));
-    if (rung == 2) {
+    if (lod == 2) {
         if (vUV.y > barf) discard;
         frag = vec4(kc, 1.0);
         return;

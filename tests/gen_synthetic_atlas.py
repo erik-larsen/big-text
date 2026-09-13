@@ -4,7 +4,7 @@
 Writes data/synthetic_atlas/{index.npz, index.json, layout.npz, layout.json}
 in exactly the formats of docs/DESIGN.md: about 40 fake files in 6
 directories at two depths, generated code-like lines with per-character
-kinds and real words (so the text rung is readable), a few items per file,
+kinds and real words (so the text LOD is readable), a few items per file,
 and a binary-partition treemap with the spec's file column layout. The
 treemap is not squarified; it only has to satisfy the formats and the
 invariants checked by tests/check_layout.py.

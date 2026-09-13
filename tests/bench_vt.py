@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The vector tier measurement: the Slug tier against the raster tier (the
-64 px mipmapped atlas sampled as line.glsl does at the text rung), on the
+64 px mipmapped atlas sampled as line.glsl does at the text LOD), on the
 default face, at 12, 32, 96 and 300 device pixels per line. The phase 6 run
 also measured the Dobbie-style grid tier the Slug tier replaced, taken from
 git; that history was rewritten before publication and the port is gone, so

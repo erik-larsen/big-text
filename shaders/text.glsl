@@ -1,6 +1,6 @@
 // text.glsl: screen-space UI text. One instance per character: position of
 // the cell's top-left corner in device pixels, cell size, atlas cell index,
-// colour. Samples the same glyph atlas as the text rung.
+// colour. Samples the same glyph atlas as the text LOD.
 #version 330 core
 layout(location = 0) in vec2 aQuad;
 layout(location = 1) in vec2 aPos;

@@ -10,6 +10,6 @@ Will Dobbie's GPU text technique. The atlas format and the two-tier glyph design
 
 Submodules. big-picture (Erik Larsen, MIT), HEPR (soadzoor, MIT) and Slug (above) are pinned as git submodules and carry their own licence files; big-text reads them as references and does not copy their code beyond the Slug shader named above.
 
-makepad. The Studio code atlas's ladder of representations is reimplemented from the public repository's history and Rik Arends' video (https://github.com/makepad/makepad, Makepad B.V., MIT by its LICENSE, its crates declaring MIT OR Apache-2.0); no code of it is used.
+makepad. The Studio code atlas's levels of detail are reimplemented from the public repository's history and Rik Arends' video (https://github.com/makepad/makepad, Makepad B.V., MIT by its LICENSE, its crates declaring MIT OR Apache-2.0); no code of it is used.
 
 emscripten. The scale example's corpus (https://github.com/emscripten-core/emscripten, the Emscripten authors, MIT or University of Illinois/NCSA); the reader clones it next to big-text, nothing of it is copied, and only screenshots of it are in the repository.

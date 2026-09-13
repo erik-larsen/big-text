@@ -2,13 +2,13 @@
 """Stage 3: the viewer.
 
 Draws a corpus laid out by atlas_layout.py as one zoomable surface with a
-ladder of representations chosen per file from its size on screen: sampled
+level of detail chosen per file from its size on screen: sampled
 one pixel line bars over a dark tile (under 1 device pixel per line), grey
 line bars (1 to 3), coloured token segments (3 to 6) and glyphs (6 and up),
 from the raster atlas and, from VT_MIN_PPL, the vector tier. All lines,
 tokens and characters of the corpus are resident on the GPU as integer and
 float textures; every frame is a handful of instanced draws whose vertex
-shaders cull by rung and view.
+shaders cull by LOD and view.
 
 The viewer does not know which corpus it shows. The index gives it a
 hierarchy, the leaves' lines with a kind per character, the items, and an
@@ -386,7 +386,7 @@ class Viewer:
         self.hits_by_file = np.zeros(self.n_files, bool)
         self.hit_count = np.zeros(self.n_files, np.int64)
         self.dimmed = np.zeros(self.n_files, bool)
-        self.rung = np.zeros(self.n_files, np.uint8)
+        self.lod = np.zeros(self.n_files, np.uint8)
         self.visible = np.zeros(self.n_files, bool)
 
     def refresh_dirs(self):
@@ -610,7 +610,7 @@ class Viewer:
         rl = a["row_line"].astype(np.int64)
         lf = np.zeros((n_rows, 4), np.float32)
         lf[:, :2] = a["row_pos"]
-        # z: the row's index within its file, for the rung-0 sampling; w: the
+        # z: the row's index within its file, for the LOD-0 sampling; w: the
         # row's width in line heights
         lf[:, 2] = np.arange(n_rows) - a["file_row0"][a["line_file"][rl]].astype(np.int64)
         if "row_width" in a:
@@ -1292,7 +1292,7 @@ class Viewer:
 
     def line_rect(self, f, line, col=0.0, lines=40, cols=100):
         """World rect around a line (about `lines` by `cols` cells), so the
-        destination of a fly-to is at the text rung."""
+        destination of a fly-to is at the text LOD."""
         p = float(self.a["file_pitch"][f])
         row, rc = self.row_of(line, col)
         x, y = (float(v) for v in self.a["row_pos"][int(row[0])])
@@ -1419,12 +1419,12 @@ class Viewer:
             return None
         f, j, col = self.hover
         text = self.paths[f]
-        if self.rung[f] >= 2 and j >= 0:
+        if self.lod[f] >= 2 and j >= 0:
             text += f":{j + 1}"
             it = self.enclosing_item(f, j)
             if it is not None:
                 text += f" {self.item_keyword(it, f)} {self.item_names[it]}"
-        if self.rung[f] == 3 and self.results is not None:
+        if self.lod[f] == 3 and self.results is not None:
             text += f" · {int(self.hit_count[f])} hits"
         return text
 
@@ -1540,7 +1540,7 @@ class Viewer:
             self.file_scale = np.ones(self.n_files)
             self.dir_scale = np.ones(self.n_dirs)
         ppl = a["file_pitch"] * self.zoom * self.file_scale
-        self.rung = ((ppl >= 1).astype(np.uint8) + (ppl >= 3) + (ppl >= 6)).astype(np.uint8)
+        self.lod = ((ppl >= 1).astype(np.uint8) + (ppl >= 3) + (ppl >= 6)).astype(np.uint8)
         flags = np.zeros(self.n_files, np.uint8)
         cur = self.cursor_override if self.scripted else self.cursor
         self.hover = (self.hover_at(*cur) if cur is not None and self.drag is None
@@ -1552,13 +1552,13 @@ class Viewer:
             if self.current_file >= 0:
                 flags[self.current_file] |= 4
             flags[self.dimmed] |= 8
-        # rung 0 draws every step-th line so the density stays about one
+        # LOD 0 draws every step-th line so the density stays about one
         # bar per pixel row; the step goes to the shader as two bytes
         self.file_step = np.ones(self.n_files, np.int64)
         sub = ppl < 1
         self.file_step[sub] = np.clip(np.ceil(1.0 / np.maximum(ppl[sub], 1e-9)), 1, 65535)
         fu = self.file_u.reshape(-1, 4)
-        fu[:self.n_files, 0] = self.rung
+        fu[:self.n_files, 0] = self.lod
         fu[:self.n_files, 1] = flags
         fu[:self.n_files, 2] = self.file_step & 255
         fu[:self.n_files, 3] = self.file_step >> 8
@@ -1590,9 +1590,9 @@ class Viewer:
 
     def draw_visible_glyphs(self):
         """A proportional face: one instanced draw per run of consecutive
-        visible files at the tokens rung or above, one instance per
+        visible files at the tokens LOD or above, one instance per
         character (glyph.glsl)."""
-        vis = self.visible & (self.rung >= 2)
+        vis = self.visible & (self.lod >= 2)
         if not vis.any():
             return
         edges = np.flatnonzero(np.diff(np.concatenate(([False], vis, [False]))))
@@ -1657,7 +1657,7 @@ class Viewer:
         bars and the line bars alike so nothing flips at the 1 px cut; from
         3 px the outlines take over (fills far, outlines near)."""
         a = self.a
-        m = (self.visible & (self.rung <= 1))[self.item_rect_file]
+        m = (self.visible & (self.lod <= 1))[self.item_rect_file]
         if not m.any():
             return np.zeros((0, 10), np.float32)
         rects = a["item_rect"][m]
@@ -1675,7 +1675,7 @@ class Viewer:
 
     def item_instances(self):
         a = self.a
-        m = (self.visible & (self.rung >= 2))[self.item_rect_file]
+        m = (self.visible & (self.lod >= 2))[self.item_rect_file]
         if not m.any():
             return np.zeros((0, 10), np.float32)
         rects = a["item_rect"][m]
@@ -1696,7 +1696,7 @@ class Viewer:
             return np.zeros((0, 10), np.float32)
         a = self.a
         f = r["file"]
-        m = self.visible[f] & (self.rung[f] >= 2)
+        m = self.visible[f] & (self.lod[f] >= 2)
         if not m.any():
             return np.zeros((0, 10), np.float32)
         idx = np.flatnonzero(m)
@@ -2012,7 +2012,7 @@ class Viewer:
 
     def run_scripted(self):
         """--frames N: N frames of the opening zoom (fit to 16 px per line
-        for the file at the corpus centre, through all four rungs) unless a
+        for the file at the corpus centre, through all four LODs) unless a
         flag pins the view, then --screenshot / --stats."""
         n = self.args.frames if self.args.frames is not None else 240
         held = self.apply_script_flags()
@@ -2042,7 +2042,7 @@ class Viewer:
         print(f"frames: {len(self.frame_times)}")
 
     def run_shots(self):
-        """--shots DIR: the standard set. The fitted map, the rungs at 2,
+        """--shots DIR: the standard set. The fitted map, the LODs at 2,
         4.5 and 16 px per line, the hover label, the filter and its first
         hit, the 3D projection with the heights on, fitted and close, and
         the tint when the corpus has one."""

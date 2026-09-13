@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage 3: raster glyph atlas for the text rung and the UI text.
+"""Stage 3: raster glyph atlas for the text LOD and the UI text.
 
 Renders the 95 printable ASCII glyphs (32..126) with Pillow into a grid of
 equal cells: 16 columns, 6 rows for ASCII plus one extra row of UI symbols

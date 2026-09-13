@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Vector glyph tier on the Slug algorithm: the text rung of big-text above
+"""Vector glyph tier on the Slug algorithm: the text LOD of big-text above
 VT_MIN_PPL device pixels per line, where the raster atlas would be
 magnified.
 

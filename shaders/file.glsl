@@ -1,9 +1,9 @@
 // file.glsl: instanced file rectangles. Per instance: tex_file_f (RGBA32F,
 // three texels per file: rect, (pitch, colw, cap, hue), (z base, height,
-// tint, unused)) and tex_file_u (RGBA8UI, one texel per file: (rung, flags,
+// tint, unused)) and tex_file_u (RGBA8UI, one texel per file: (LOD, flags,
 // step lo, step hi); flags bit 0 hovered, bit 1 has hits, bit 2 current hit,
 // bit 3 dimmed).
-// Invisible files become a degenerate quad. Every rung draws
+// Invisible files become a degenerate quad. Every LOD draws
 // the dark file background under the lines (the hue is only in the
 // directory bands). The border is in device pixels, computed from the world
 // distance to the edge and fwidth so it holds in perspective: 1 grey, 2
@@ -22,7 +22,7 @@ uniform float uZScale;
 uniform vec3 uHue[12];
 out vec2 vWorld;
 flat out vec4 vRect;
-flat out ivec2 vRF;         // rung, flags
+flat out ivec2 vRF;         // LOD, flags
 flat out vec3 vTile;
 flat out int vRing;
 flat out float vTint;
@@ -73,8 +73,8 @@ void main() {
     int flags = vRF.y;
     bool hovered = (flags & 1) != 0, hit = (flags & 2) != 0;
     bool current = (flags & 4) != 0, dimmed = (flags & 8) != 0;
-    // every rung shares the file background: the hue lives in the directory
-    // bands only, so the rung 0/1 cut does not flip a file's colour
+    // every LOD shares the file background: the hue lives in the directory
+    // bands only, so the LOD 0/1 cut does not flip a file's colour
     vec3 col = uPage;
     // the tint colours the fill only; bands, bars and glyphs stay
     if (uTint == 1) col = mix(col, EMBER, 0.65 * vTint);

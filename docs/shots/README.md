@@ -27,25 +27,25 @@ Regenerate everything with:
 
 The line numbers in the `--goto` and `--hover` commands are the ones that held when the images were taken (`class Viewer`, `def tokenize`, the README's longest line, emcc's `def main`); they move as the files are edited.
 
-"N px per line" below means N device pixels per line for the file under the view centre; files with a larger or smaller pitch sit on other rungs in the same frame, which is the per-file ladder at work.
+"N px per line" below means N device pixels per line for the file under the view centre; files with a larger or smaller pitch sit on other LODs in the same frame, which is the per-file level of detail at work.
 
 ## The standard set
 
 `--shots DIR` writes the same nine images for any corpus:
 
 - `overview.png`: the map fitted to the window.
-- `bars.png`, `tokens.png`, `text.png`: 2, 4.5 and 16 px per line about the corpus centre: the line-bars rung, the tokens rung with item outlines, the text rung.
+- `bars.png`, `tokens.png`, `text.png`: 2, 4.5 and 16 px per line about the corpus centre: the line-bars LOD, the tokens LOD with item outlines, the text LOD.
 - `hover.png`: the text view with the cursor at the window centre: the hovered file's light border and label.
 - `filter.png`: the fitted map with the `--filter` word applied: every hit file outlined in yellow, the rest dimmed, the panel listing the hits by file, the status line counting them.
-- `result.png`: after stepping to the first hit: the fly-to landed at the text rung with the hit filled yellow, the file's 3 px border, the row highlighted in the panel.
+- `result.png`: after stepping to the first hit: the fly-to landed at the text LOD with the hit filled yellow, the file's 3 px border, the row highlighted in the panel.
 - `3d.png`, `3d_zoom.png`: the 3D projection with the heights on, at tilt 55 and yaw 12, fitted and at 3 px per line about the centre.
 - `<label>.png`, when the corpus has a tint (`churn.png` for code): the fitted map with the tint on.
 
 ## The README's opening images
 
-- `big-text/hero.png`: big-text's own source fitted in 3D at tilt 55 and yaw 12 with the heights and the tint on: the most edited files ember, the roofs at the rungs their sizes allow.
-- `war-and-peace/hero.png`: War and Peace in 3D at tilt 55 and yaw 12, 3 px per line about page 481 (Book Five): one flat grid of pages in perspective (a book has no heights), the near pages at the text rung, the far rows at bars. The README's second image.
-- `emscripten/hero.png`: the same on emscripten at 2.2 px per line about `tools/link.py` with the tint on: the near roofs at the tokens and text rungs, the far ones at bars. Not in the README.
+- `big-text/hero.png`: big-text's own source fitted in 3D at tilt 55 and yaw 12 with the heights and the tint on: the most edited files ember, the roofs at the LODs their sizes allow.
+- `war-and-peace/hero.png`: War and Peace in 3D at tilt 55 and yaw 12, 3 px per line about page 481 (Book Five): one flat grid of pages in perspective (a book has no heights), the near pages at the text LOD, the far rows at bars. The README's second image.
+- `emscripten/hero.png`: the same on emscripten at 2.2 px per line about `tools/link.py` with the tint on: the near roofs at the tokens and text LODs, the far ones at bars. Not in the README.
 
 ## Layout previews
 
@@ -71,7 +71,7 @@ The whole tree as git tracks it, test suites and system libraries included, at t
 
 In the book's own scheme, Dobbie's: white pages and black text on his demo's blue-grey ground, the text in Literata, every glyph placed by its own advance. The standard set with `--filter Natasha` (1,213 hits on 299 pages), a book having no tint, plus:
 
-- `war-and-peace/overview.png`: the map fitted: one grid of pages in reading order, the front matter's contents pages first, each page a cell at the line-bars rung; no part is drawn, the crumb trail names the one under the centre.
+- `war-and-peace/overview.png`: the map fitted: one grid of pages in reading order, the front matter's contents pages first, each page a cell at the line-bars LOD; no part is drawn, the crumb trail names the one under the centre.
 - `war-and-peace/hover.png`: the text view hovered at the centre: the label `Book Eight: 1811 - 12/Chapter IX/p. 657` (part, chapter, page; a book has no items).
 - `war-and-peace/result.png`: after stepping to the first mention (Book One, Chapter XI, p. 56, line 41), the fly-to at text zoom with the hit filled yellow.
 - `war-and-peace/3d.png`, `3d_zoom.png`: the grid tilted, nothing extruded: a book's layout is flat whatever the heights setting.
@@ -79,4 +79,4 @@ In the book's own scheme, Dobbie's: white pages and black text on his demo's blu
 
 ## Frame times
 
-`--frames 300 --stats --no-hover` runs the scripted zoom from the fitted map to 16 px per line at the corpus centre, through all four rungs, on an M4 MacBook at a 2940 by 1640 framebuffer: big-text 1.4 ms mean, 3.9 ms 99th percentile; War and Peace 2.4 ms mean, 7.6 ms 99th percentile over the shots run; emscripten (279 MB on the GPU) 5.5 ms mean and 25 ms 99th percentile, the tail being the fitted view where every line is visible, and held at 16 px per line (`--zoom 16`) 3.3 ms mean, 6.9 ms 99th percentile.
+`--frames 300 --stats --no-hover` runs the scripted zoom from the fitted map to 16 px per line at the corpus centre, through all four LODs, on an M4 MacBook at a 2940 by 1640 framebuffer: big-text 1.4 ms mean, 3.9 ms 99th percentile; War and Peace 2.4 ms mean, 7.6 ms 99th percentile over the shots run; emscripten (279 MB on the GPU) 5.5 ms mean and 25 ms 99th percentile, the tail being the fitted view where every line is visible, and held at 16 px per line (`--zoom 16`) 3.3 ms mean, 6.9 ms 99th percentile.
