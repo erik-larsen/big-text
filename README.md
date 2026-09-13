@@ -26,7 +26,7 @@ big-picture draws a gigapixel image with a fixed GPU budget by streaming tiles f
 
 ## Vector text: Dobbie, Slug, and what big-text takes from each
 
-The two glyph lineages are one technique with a ten-year gap, and the record is worth stating plainly because the commercial telling omits half of it.
+The two glyph lineages are one technique with a ten-year gap.
 
 | Date | Event |
 |---|---|
@@ -39,13 +39,13 @@ The two glyph lineages are one technique with a ten-year gap, and the record is 
 
 The patent never covered Dobbie's method. Its one independent claim is the root-selection rule: classify each control point by its sign relative to the ray, then decide from that classification which roots count. Dobbie selects roots by testing whether t lies in (0, 1), which is exactly the step the paper shows to be numerically fragile near shared endpoints and tangents, the cause of his sparkles. So Dobbie's shader was always free to reimplement, and the dedication unlocked only the fix. Everything else in Slug, bands included, was unclaimed or already public in Dobbie's grid.
 
-What each is better at, first from reading both shaders and then from measuring them (the table under Implementation):
+What each is better at:
 
 - **Slug's vector shader is better everywhere the vector shader is used.** It never double-counts a crossing, its bands hold any number of curves where Dobbie's cells hold eight, its two axis rays cost half of his four, and its bands are widened by half the largest expected pixel, so text stays correct at small sizes where Dobbie's fragment reads one cell and misses its neighbours' curves. His raster tier was the workaround for that.
 - **Dobbie's two tiers are the only published answer to sub-legible text.** Slug's cost per pixel is the curve count of the band and its bands assume a smallest font size; a page thumbnail at a fraction of a pixel per glyph is outside it. A mipmapped raster atlas handles that regime correctly and almost for free, because trilinear filtering is the exact prefilter for a shrinking image. HEPR kept the tier for the same reason.
 - **Dobbie's static document is a system design, not a shader.** Lay the corpus out once, keep it resident, draw a page as a vertex range, skip pages off screen. It is big-picture's streaming with a single tile, and it is what big-text does today.
 
-So big-text keeps Dobbie's architecture and puts Slug inside its vector tier: bands, the sign-classification rule, the two-ray box filter. The handoff to raster moved from Dobbie's fixed two texels per pixel to where the measurement put it, 12 pixels per line. Below the raster tier the ladder continues with line bars and tiles, the regime neither of them addressed, and the handoff between raster glyphs and line bars is the one open design question in this area.
+So big-text keeps Dobbie's architecture and puts Slug inside its vector tier: bands, the sign-classification rule, the two-ray box filter. The handoff to raster sits where the measurement under Implementation puts it, 12 pixels per line, rather than at Dobbie's fixed two texels per pixel. Below the raster tier the ladder continues with line bars and tiles, the regime neither of them addressed, and the handoff between raster glyphs and line bars is the one open design question in this area.
 
 ## One framework, many corpora
 
@@ -218,33 +218,29 @@ The contract the code was built against is [docs/DESIGN.md](docs/DESIGN.md), wit
 
 Measured on an M4 MacBook at a 2940 by 1640 framebuffer, `--frames 300 --stats` over the scripted zoom from fit to text: makepad-draw 1.6 ms mean and 4.4 ms 99th percentile, or 2.1 and 6.3 with the churn lens and the rail; the full makepad tree 4.5 and 23.7 ms, the tail being the fitted view where all 3.67 million lines are visible, and 1.3 ms once zoomed to text. A past revision of makepad-draw loads in 0.8 s from scratch and instantly from the cache.
 
-The vector tier was measured by `tests/bench_vt.py` before the Dobbie port was deleted: the Slug tier, the port, and the raster tier (the 64 px mipmapped atlas sampled as the text rung samples it), on the bundled face, against the exact coverage of the same string (Pillow at eight times the size, box-filtered down; a hinted reference at the target size favours the raster tier, which is itself a Pillow render). Error is the mean absolute coverage difference over the whole image and over ink pixels; time is one full 2940 by 1640 screen of glyph cells, the best of five batches of fifty draws; sparkle is the number of pixels whose coverage jumps by more than a quarter between neighbouring sub-pixel offsets 0.1 px apart, which a one-pixel box filter cannot do on an edge.
+`tests/bench_vt.py` measures the vector tier against the raster tier (the 64 px mipmapped atlas sampled as the text rung samples it) on the bundled face, against the exact coverage of the same string: Pillow at eight times the size, box-filtered down, since a hinted reference at the target size favours the raster tier, which is itself a Pillow render. Error is the mean absolute coverage difference over the whole image and over ink pixels; time is one full 2940 by 1640 screen of glyph cells, the best of five batches of fifty draws; sparkle is the number of pixels whose coverage jumps by more than a quarter between neighbouring sub-pixel offsets 0.1 px apart, which a one-pixel box filter cannot do on an edge.
 
 | px per line | tier | error, all | error, ink | ms per screen | cells per screen | sparkle mean | sparkle max |
 |---|---|---|---|---|---|---|---|
-| 12 | Slug | 0.0144 | 0.0636 | 0.48 | 58208 | 7.6 | 16 |
-| 12 | grid (the port) | 0.0194 | 0.0853 | 0.43 | 58208 | 114.9 | 192 |
+| 12 | vector | 0.0144 | 0.0636 | 0.48 | 58208 | 7.6 | 16 |
 | 12 | raster | 0.0353 | 0.0966 | 0.24 | 58208 | 2.6 | 9 |
-| 32 | Slug | 0.0038 | 0.0227 | 0.14 | 8160 | 9.4 | 19 |
-| 32 | grid | 0.0094 | 0.0491 | 0.13 | 8160 | 178.6 | 243 |
+| 32 | vector | 0.0038 | 0.0227 | 0.14 | 8160 | 9.4 | 19 |
 | 32 | raster | 0.0179 | 0.0787 | 0.07 | 8160 | 0.7 | 3 |
-| 96 | Slug | 0.0014 | 0.0102 | 0.08 | 901 | 14.5 | 24 |
-| 96 | grid | 0.0036 | 0.0234 | 0.07 | 901 | 356.0 | 432 |
+| 96 | vector | 0.0014 | 0.0102 | 0.08 | 901 | 14.5 | 24 |
 | 96 | raster | 0.0166 | 0.0967 | 0.04 | 901 | 0.4 | 5 |
-| 300 | Slug | 0.0005 | 0.0039 | 0.05 | 85 | 30.8 | 49 |
-| 300 | grid | 0.0012 | 0.0087 | 0.05 | 85 | 1059.0 | 2118 |
+| 300 | vector | 0.0005 | 0.0039 | 0.05 | 85 | 30.8 | 49 |
 | 300 | raster | 0.0212 | 0.1216 | 0.07 | 85 | 1.3 | 13 |
 
-Slug halves the port's error at every size and has ten to forty times fewer sparkles; against the raster tier its error is lower even at 12 px, so the handoff `VT_MIN_PPL` is 12 px per line and the raster atlas serves only the 6 to 12 px band of the text rung. It costs 7 to 18 percent more time than the port, one or two hundredths of a millisecond per full screen, accepted for the accuracy and the licence. Vector text is on by default because at 12 px it takes 0.48 ms per screen against the raster tier's 0.24, the rule's factor of two exactly. The harness now measures the Slug and raster tiers only, the port being gone; the grid rows are its last measurement.
+The vector tier's error is below the raster tier's even at 12 px, so the handoff `VT_MIN_PPL` is 12 px per line and the raster atlas serves only the 6 to 12 px band of the text rung. Vector text is on by default: at 12 px it costs 0.48 ms per screen against the raster tier's 0.24, and at every larger size the two are within a few hundredths of a millisecond.
 
-![the three tiers at 12 px](docs/shots/vt_bench_12.png)
-![the three tiers at 96 px](docs/shots/vt_bench_96.png)
+![the tiers at 12 px](docs/shots/vt_bench_12.png)
+![the tiers at 96 px](docs/shots/vt_bench_96.png)
 
 Not built: the palette and legend buttons, and a streaming working set; the whole corpus is resident, which is fine to a few million lines.
 
 ## Open questions
 
-The settled decisions and their reasons are in [docs/DESIGN.md](docs/DESIGN.md); the phase plan and what each phase closed are in [docs/PARITY.md](docs/PARITY.md). Still open:
+The decisions and their reasons are in [docs/DESIGN.md](docs/DESIGN.md), the checklist against the makepad video in [docs/PARITY.md](docs/PARITY.md). Open:
 
 1. **The next corpus.** A book is nearly the code adapter (pages as files, reading order as the layout); photos exercise the image payload and big-picture's pyramid and are the first real test of the adapter split; a dagcmp volume is the largest hierarchy with the least text. Proposal: book, then photos, then DXF.
 2. **Fonts beyond ASCII monospace.** Unicode coverage and proportional faces for books, and a serif face chosen from the OFL families with quadratic outlines (Literata, Libertinus Serif) when the book corpus starts.
@@ -252,17 +248,17 @@ The settled decisions and their reasons are in [docs/DESIGN.md](docs/DESIGN.md);
 4. **Budget and eviction.** Per-file instance ranges under a byte budget for text and big-picture's pages for images; whether one budget covers both. Built only once a corpus needs it.
 5. **The handoff from raster glyphs to line bars.** Where a pixel starts to cover several glyphs and per-glyph quads overdraw: a hard cut at a pixels-per-line threshold as today, a blend, or whole lines cached as texture rows first. The one place the ladder is not yet designed, and the same problem in all three payloads.
 
-## Copyright path
+## Licences
 
-Everything big-text writes is MIT ([LICENSE](LICENSE), Erik Larsen). Everything it reuses is listed here with its licence and the way it is reused, so that the public repository is clean by construction rather than by audit: pin (a submodule at a commit, the upstream licence applying inside it), translate (code ported with the upstream notice kept), or reimplement (only the published description used, no code).
+big-text is MIT ([LICENSE](LICENSE), Erik Larsen). What it reuses, with the licence and the way it is reused: pin (a submodule at a commit, the upstream licence applying inside it), translate (code ported with the upstream notice kept), or reimplement (only the published description used, no code). [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES) carries the notices.
 
 | Part | Author, licence | How it is reused |
 |---|---|---|
 | big-picture, dagcmp | Erik Larsen, MIT | pin |
 | makepad (public engine) | Makepad B.V., MIT by the repository's LICENSE; its crates declare MIT OR Apache-2.0 in their Cargo.toml, and the vendored libraries under `libs/` carry their own | pin at a2fdeb325; the code atlas is reimplemented from the video and the commit messages, its private crates are not used |
-| Slug | Eric Lengyel, MIT or Apache-2.0; patent US 10,373,352 dedicated to the public domain 2026-03-17 | pin at be3c13e; the pixel shader translated to GLSL in `shaders/vt_glyph.glsl` with the notice there and in [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES). The 2017 JCGT supplemental GLSL is under the journal's terms and is not used |
+| Slug | Eric Lengyel, MIT or Apache-2.0; patent US 10,373,352 dedicated to the public domain 2026-03-17 | pin at be3c13e; the pixel shader translated to GLSL in `shaders/vt_glyph.glsl` with the notice kept. The 2017 JCGT supplemental GLSL is under the journal's terms and is not used |
 | HEPR | soadzoor, MIT | pin at c81c326 (0.1.29); its stroke and fill shaders will be translated with their notices when the vector work starts |
-| Dobbie's technique, formats and tiers | Will Dobbie, 2016, blog posts, no licence published | reimplement from the posts. No code or data of his is in the repository or its history: a port of his shader and copies of his demo files were in early commits, and the history was rewritten with `git filter-repo` before publication to remove them, then the GitHub repository recreated so no pre-rewrite object remains |
+| Dobbie's technique, formats and tiers | Will Dobbie, 2016, blog posts, no licence published | reimplement from the posts; no code or data of his is used |
 | JetBrains Mono NL | JetBrains, OFL 1.1 | pin: `fonts/JetBrainsMonoNL-Regular.ttf` with `fonts/OFL.txt` and `fonts/AUTHORS.txt`; the atlases the viewer builds from it are embeddings in the OFL's sense |
 | War and Peace | Leo Tolstoy, Maude translation, public domain via Project Gutenberg | the book corpus, laid out by big-text itself, when that corpus starts |
 
@@ -275,8 +271,8 @@ big-text/
   README.md                    this file
   requirements.txt             the Python packages (pip install -r)
   LICENSE, THIRD_PARTY_NOTICES MIT for big-text; what is reused from whom, and how
-  docs/DESIGN.md               the build contract, phase by phase, with the as-built deviations
-  docs/PARITY.md               the checklist against the makepad video, the phase plan, where things stand
+  docs/DESIGN.md               the design contract and the as-built deviations
+  docs/PARITY.md               the checklist against the makepad video and what is left
   docs/shots/                  screenshots and the commands that made them
   notes/makepad-code-atlas.md  what the public makepad history and the video say about the code atlas
   atlas_index.py               source tree -> data/<name>_atlas/index.npz + index.json
