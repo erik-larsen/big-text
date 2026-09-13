@@ -1,31 +1,31 @@
 # Screenshots
 
-Every image is a framebuffer grab from `atlas_viewer.py` on the development machine (M4 MacBook, a 1470 by 820 point window sized to the screen's work area, 2940 by 1640 device pixel framebuffer, the same in every run), except the three `*_layout.png` files, which are `atlas_layout.py --preview` renders. Three corpora: big-text's own source (the README's default example), makepad's drawing and platform crates (the scale example, cloned next to big-text), and War and Peace (the book).
+Every image is a framebuffer grab from `atlas_viewer.py` on the development machine (M4 MacBook, a 1470 by 820 point window sized to the screen's work area, 2940 by 1640 device pixel framebuffer, the same in every run), except the three `*_layout.png` files, which are `atlas_layout.py --preview` renders. Three corpora: big-text's own source (the README's default example), the whole emscripten tree (the scale example, cloned next to big-text), and War and Peace (the book).
 
 Regenerate everything with:
 
 ```
 ./atlas_index.py . --out data/big-text_atlas
-./atlas_index.py ../makepad/draw ../makepad/platform --out data/makepad-draw_atlas
+./atlas_index.py ../emscripten --out data/emscripten_atlas
 ./book_index.py --gutenberg 2600 --out data/war-and-peace_atlas
 ./atlas_layout.py data/big-text_atlas --preview docs/shots/big-text_layout.png
-./atlas_layout.py data/makepad-draw_atlas --preview docs/shots/makepad-draw_layout.png
+./atlas_layout.py data/emscripten_atlas --preview docs/shots/emscripten_layout.png
 ./atlas_layout.py data/war-and-peace_atlas --preview docs/shots/war-and-peace_layout.png
 ./atlas_viewer.py data/big-text_atlas --shots docs/shots/big-text --filter Viewer --stats
-./atlas_viewer.py data/makepad-draw_atlas --shots docs/shots/makepad-draw --filter Window --stats
+./atlas_viewer.py data/emscripten_atlas --shots docs/shots/emscripten --filter EM_JS --stats
 ./atlas_viewer.py data/war-and-peace_atlas --shots docs/shots/war-and-peace --filter Natasha --stats
 ./atlas_viewer.py data/big-text_atlas --proj 3d --tilt 55 --yaw 12 --tint --frames 1 --no-hover --screenshot docs/shots/big-text/hero.png
 ./atlas_viewer.py data/big-text_atlas --proj 3d --tilt 55 --yaw 12 --hover atlas_index.py:169:5 --frames 2 --screenshot docs/shots/big-text/3d_text.png
 ./atlas_viewer.py data/big-text_atlas --goto README.md:62 --zoom 14 --frames 2 --screenshot docs/shots/big-text/wrapped.png
 ./atlas_viewer.py data/big-text_atlas --goto atlas_viewer.py:266 --zoom 120 --frames 3 --screenshot docs/shots/big-text/text_120_raster.png --no-vector-text
 ./atlas_viewer.py data/big-text_atlas --goto atlas_viewer.py:266 --zoom 120 --frames 3 --screenshot docs/shots/big-text/text_120_vector.png
-./atlas_viewer.py data/makepad-draw_atlas --proj 3d --tilt 55 --yaw 12 --tint --goto platform/src/window.rs:1173 --zoom 2.2 --frames 2 --screenshot docs/shots/makepad-draw/hero.png
-./atlas_viewer.py data/makepad-draw_atlas --proj 3d --tilt 55 --yaw 12 --hover platform/src/os/linux/x11/x11_sys.rs:8:12 --frames 2 --screenshot docs/shots/makepad-draw/3d_text.png
+./atlas_viewer.py data/emscripten_atlas --proj 3d --tilt 55 --yaw 12 --tint --goto tools/link.py:1500 --zoom 2.2 --frames 2 --screenshot docs/shots/emscripten/hero.png
+./atlas_viewer.py data/emscripten_atlas --proj 3d --tilt 55 --yaw 12 --hover emcc.py:199:5 --frames 2 --screenshot docs/shots/emscripten/3d_text.png
 ./atlas_viewer.py data/war-and-peace_atlas --proj 3d --tilt 55 --yaw 12 --goto "p. 481:1" --zoom 3 --frames 2 --no-hover --screenshot docs/shots/war-and-peace/hero.png
 ./atlas_viewer.py data/war-and-peace_atlas --goto "p. 17:1" --zoom 11 --frames 2 --no-hover --screenshot docs/shots/war-and-peace/opening.png
 ```
 
-The line numbers in the `--goto` and `--hover` commands are the ones that held when the images were taken (`class Viewer`, `def tokenize`, the README's longest line); they move as the files are edited.
+The line numbers in the `--goto` and `--hover` commands are the ones that held when the images were taken (`class Viewer`, `def tokenize`, the README's longest line, emcc's `def main`); they move as the files are edited.
 
 "N px per line" below means N device pixels per line for the file under the view centre; files with a larger or smaller pitch sit on other rungs in the same frame, which is the per-file ladder at work.
 
@@ -45,12 +45,12 @@ The line numbers in the `--goto` and `--hover` commands are the ones that held w
 
 - `big-text/hero.png`: big-text's own source fitted in 3D at tilt 55 and yaw 12 with the tint on: the most edited files ember, the roofs at the rungs their sizes allow.
 - `war-and-peace/hero.png`: War and Peace in 3D at tilt 55 and yaw 12, 3 px per line about page 481 (Book Five): one flat sheet in perspective, the near pages at the text rung, the far rows at bars, the Books as bands with their labels stacked along the left edge. The README's second image.
-- `makepad-draw/hero.png`: the same on makepad-draw at 2.2 px per line about `platform/src/window.rs` with the tint on: the near roofs at the tokens and text rungs, the far ones at bars. Not in the README.
+- `emscripten/hero.png`: the same on emscripten at 2.2 px per line about `tools/link.py` with the tint on: the near roofs at the tokens and text rungs, the far ones at bars. Not in the README.
 
 ## Layout previews
 
 - `big-text_layout.png`: the layout stage's own render of big-text (29 files, about 7,200 lines): the `docs/`, `tests/` and `shaders/` bands, files as 1 px outlines wrapped into columns, one grey bar per line from indent to length.
-- `makepad-draw_layout.png`: the same for makepad/draw plus makepad/platform (493 files, 280,607 lines, 53 directories): nested directory bands in the top-level hue, big files wrapped into up to 15 columns, tiny files as slivers.
+- `emscripten_layout.png`: the same for the whole emscripten tree (11,495 files, 2.80 million lines, 698 directories): nested directory bands in the top-level hue, `test/` and `system/` the largest, big files wrapped into up to 64 columns, tiny files as slivers.
 - `war-and-peace_layout.png`: the book: the front matter, then every Book a full-width band of whole page rows, 65 pages across, one grey bar per line, a chapter's last page short.
 
 ## big-text (its own source: 29 files, about 7,200 lines)
@@ -63,9 +63,9 @@ The default example, so the counts move whenever this documentation is edited. T
 - `big-text/text_120_vector.png`: the same view with the default vector tier: the glyphs are crisp at any magnification.
 - `big-text/churn.png`: the tint: every file's fill ember by the log of its lines added and removed over the repository's history; a young repository, so every file carries some.
 
-## makepad-draw (493 files, 280,607 lines, 10,182,050 chars)
+## emscripten (11,495 files, 2,800,173 lines, 91.7 million chars)
 
-The standard set with `--filter Window` (130 hits in 25 files, grouped by file), plus `3d_text.png` (`--proj 3d --hover platform/src/os/linux/x11/x11_sys.rs:8:12`, text zoom on a roof in perspective with the hover label) and `churn.png` (the tint over 724 commits: the linux and web platform code and the generated bindings are the hottest).
+The whole tree as git tracks it, test suites and system libraries included, at the commit cloned. The standard set with `--filter EM_JS` (126 hits in 53 files, grouped by file), plus `3d_text.png` (`--proj 3d --hover emcc.py:199:5`, text zoom on a roof in perspective with the hover label `emcc.py:199 def main`) and `churn.png` (the tint over 30,274 commits: every file's fill ember by the log of its lines added and removed, the vendored test suites under `test/third_party` the brightest, having landed whole).
 
 ## War and Peace (Project Gutenberg 2600: 18 parts, 366 chapters, 1,401 pages, 63,191 lines, 2.63 million glyphs)
 
@@ -79,4 +79,4 @@ The standard set with `--filter Natasha` (1,213 hits on 299 pages), a book havin
 
 ## Frame times
 
-`--frames 300 --stats --no-hover` runs the scripted zoom from the fitted map to 16 px per line at the corpus centre, through all four rungs, on an M4 MacBook at a 2940 by 1640 framebuffer: big-text 1.4 ms mean, 3.9 ms 99th percentile; makepad-draw 1.9 ms mean, 5.8 ms 99th percentile; War and Peace 2.4 ms mean, 7.6 ms 99th percentile over the shots run. The full makepad tree (`./atlas_index.py ../makepad --out data/makepad_atlas`, 7,145 files, 3.67 million lines, 385 MB on the GPU) gives 6.9 ms mean and 37 ms 99th percentile, the tail being the fitted view where every line is visible; held at 16 px per line (`--zoom 16`) it runs at 3.1 ms mean, 4.7 ms 99th percentile.
+`--frames 300 --stats --no-hover` runs the scripted zoom from the fitted map to 16 px per line at the corpus centre, through all four rungs, on an M4 MacBook at a 2940 by 1640 framebuffer: big-text 1.4 ms mean, 3.9 ms 99th percentile; War and Peace 2.4 ms mean, 7.6 ms 99th percentile over the shots run; emscripten (279 MB on the GPU) 5.5 ms mean and 25 ms 99th percentile, the tail being the fitted view where every line is visible, and held at 16 px per line (`--zoom 16`) 3.3 ms mean, 6.9 ms 99th percentile.

@@ -15,7 +15,7 @@ files are one contiguous range, and so are their lines. See docs/DESIGN.md
 for the exact arrays and JSON keys.
 
   ./atlas_index.py . --out data/big-text_atlas
-  ./atlas_index.py ../makepad/draw ../makepad/platform --out data/makepad-draw_atlas
+  ./atlas_index.py ../emscripten --out data/emscripten_atlas
 """
 import argparse
 import fnmatch
