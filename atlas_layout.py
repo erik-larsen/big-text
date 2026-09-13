@@ -214,9 +214,10 @@ def book_flow(dirs, world, page_aspect):
 
 # ---------------------------------------------------------------- files
 
-def file_columns(w, h, n, target, char_aspect):
-    """(k, rows, pitch, col_w, cap): the most columns whose capacity still
-    reaches target characters (cap falls monotonically with k), else k = 1."""
+def file_columns(w, h, n, target):
+    """(k, rows, pitch, col_w, capw): the most columns whose capacity, in
+    line heights, still reaches the target width (the capacity falls
+    monotonically with k), else k = 1."""
     if n == 0:
         n = 1
     chosen = None
@@ -224,16 +225,16 @@ def file_columns(w, h, n, target, char_aspect):
         rows = -(-n // k)
         p = h / (rows + 2)
         cw = w / (k + GAP * (k - 1))
-        cap = int(cw / (p * char_aspect)) if p > 0 else 0
-        if chosen is not None and cap < target:
+        capw = cw / p if p > 0 else 0.0
+        if chosen is not None and capw < target:
             break
-        if cap >= target or chosen is None:
-            chosen = (k, rows, p, cw, cap)
-    k, rows, p, cw, cap = chosen
+        if capw >= target or chosen is None:
+            chosen = (k, rows, p, cw, capw)
+    k, rows, p, cw, capw = chosen
     k2 = -(-n // rows)                 # columns the rows can actually fill
     if k2 < k:                         # widen them instead of leaving empty strips
         cw = w / (k2 + GAP * (k2 - 1))
-        chosen = (k2, rows, p, cw, int(cw / (p * char_aspect)) if p > 0 else 0)
+        chosen = (k2, rows, p, cw, cw / p if p > 0 else 0.0)
     return chosen
 
 
@@ -263,48 +264,78 @@ def rows_per_line(line_len, capw):
     return 1 + (extra + (capw - HANG) - 1) // (capw - HANG)
 
 
-def layout_files(file_rect, file_line0, line_len, char_aspect, page=None):
-    """Per file: pitch, columns, rows per column, characters per column,
-    column width (with its gap). Long lines wrap inside their column, so the
+def rows_per_line_w(line_w, capw, hang_w):
+    """The same by width, in line heights: the estimate the pitch iteration
+    uses for a proportional face (the exact wrap follows in wrap_rows_w)."""
+    extra = np.maximum(line_w - capw, 0.0)
+    return 1 + np.ceil(extra / max(capw - hang_w, 1e-6)).astype(np.int64)
+
+
+def layout_files(file_rect, file_line0, line_len, line_w, char_aspect, page=None, prop=None):
+    """Per file: pitch, columns, rows per column, characters per column
+    (for a monospace face), column width (with its gap), and the column's
+    capacity in line heights. Long lines wrap inside their column, so the
     row count is found by iterating the pitch and the capacity to a fixed
-    point; columns narrower than WRAP_MIN characters clip instead. For a
-    book `page` is (lines, width): every file is pitched as a full page and
-    aims at the book's line width, so a short last page keeps its chapter's
-    text size and no page splits into columns."""
+    point; monospace columns narrower than WRAP_MIN characters clip instead.
+    `line_w` is every line's width in line heights (characters times the
+    aspect for a monospace face, the sum of the advances for a proportional
+    one, `prop` = (advances table, hang width) then). For a book `page` is
+    (lines, width): every file is pitched as a full page and aims at the
+    book's line width, so a short last page keeps its chapter's text size
+    and no page splits into columns."""
     n_files = len(file_rect)
     pitch = np.zeros(n_files)
     cols = np.zeros(n_files, np.int64)
     rows = np.zeros(n_files, np.int64)
     cap = np.zeros(n_files, np.int64)
     colw = np.zeros(n_files)
+    capw_out = np.zeros(n_files)
+    hang_w = prop[1] if prop else HANG * char_aspect
     for f in range(n_files):
         x0, y0, x1, y1 = file_rect[f]
         a, b = int(file_line0[f]), int(file_line0[f + 1])
         n = b - a
-        lens = line_len[a:b]
+        lens, widths = line_len[a:b], line_w[a:b]
         if page is None:
-            target = int(np.percentile(lens, 90)) if n else TARGET_MIN
-            target = min(max(target, TARGET_MIN), TARGET_MAX)
-            k, r, p, cw, c = file_columns(x1 - x0, y1 - y0, n, target, char_aspect)
+            target = float(np.percentile(widths, 90)) if n else TARGET_MIN * char_aspect
+            target = min(max(target, TARGET_MIN * char_aspect), TARGET_MAX * char_aspect)
+            k, r, p, cw, capw = file_columns(x1 - x0, y1 - y0, n, target)
         else:
-            k, r, p, cw, c = file_columns(x1 - x0, y1 - y0, max(n, page[0]), page[1], char_aspect)
-        c = min(c, CAP_MAX)
-        if n and c >= WRAP_MIN and (lens > c).any():
-            h = y1 - y0
-            for _ in range(4):                # pitch and capacity to a fixed point
-                capw = c if c >= WRAP_MIN else CAP_MAX
-                total = int(rows_per_line(lens, capw).sum())
-                r = -(-total // k)
+            k, r, p, cw, capw = file_columns(x1 - x0, y1 - y0, max(n, page[0]), page[1])
+        if prop:
+            c = CAP_MAX                       # every character wraps by width; nothing clips
+            if n and (widths > capw).any():
+                h = y1 - y0
+                for _ in range(4):            # pitch and capacity to a fixed point
+                    total = int(rows_per_line_w(widths, capw, hang_w).sum())
+                    r = -(-total // k)
+                    p2 = h / (r + 2)
+                    capw2 = cw / p2 if p2 > 0 else 0.0
+                    if abs(capw2 - capw) < 1e-9:
+                        break
+                    p, capw = p2, capw2
+                r = -(-int(rows_per_line_w(widths, capw, hang_w).sum()) // k)
                 p = h / (r + 2)
-                c2 = min(int(cw / (p * char_aspect)) if p > 0 else 0, CAP_MAX)
-                if c2 == c:
-                    break
-                c = c2
-            capw = c if c >= WRAP_MIN else CAP_MAX
-            r = -(-int(rows_per_line(lens, capw).sum()) // k)
-            p = h / (r + 2)
-        pitch[f], cols[f], rows[f], cap[f], colw[f] = p, k, r, c, cw * (1 + GAP)
-    return pitch, cols, rows, cap, colw
+                capw = cw / p if p > 0 else 0.0
+        else:
+            c = min(int(capw / char_aspect), CAP_MAX)
+            if n and c >= WRAP_MIN and (lens > c).any():
+                h = y1 - y0
+                for _ in range(4):            # pitch and capacity to a fixed point
+                    cw_ = c if c >= WRAP_MIN else CAP_MAX
+                    total = int(rows_per_line(lens, cw_).sum())
+                    r = -(-total // k)
+                    p = h / (r + 2)
+                    c2 = min(int(cw / (p * char_aspect)) if p > 0 else 0, CAP_MAX)
+                    if c2 == c:
+                        break
+                    c = c2
+                cw_ = c if c >= WRAP_MIN else CAP_MAX
+                r = -(-int(rows_per_line(lens, cw_).sum()) // k)
+                p = h / (r + 2)
+            capw = cw / p if p > 0 else 0.0
+        pitch[f], cols[f], rows[f], cap[f], colw[f], capw_out[f] = p, k, r, c, cw * (1 + GAP), capw
+    return pitch, cols, rows, cap, colw, capw_out
 
 
 def wrap_rows(file_line0, line_len, cap):
@@ -327,13 +358,66 @@ def wrap_rows(file_line0, line_len, cap):
     return line_row0, row_line, col0, np.maximum(row_len, 0), first
 
 
-def row_positions(file_rect, file_row0, pitch, rows, colw, row_first, char_aspect):
+def wrap_rows_w(file_line0, line_off, char_w, line_w, capw, hang_w):
+    """The visual rows of every line for a proportional face: like
+    wrap_rows, but a line breaks where the next character would end past
+    the column's capacity in line heights, continuation rows holding capw
+    minus the hang. Only the lines wider than their column are walked.
+    Returns (line_row0, row_line, row_col0, row_len, row_first)."""
+    n_lines = len(line_w)
+    per_file = np.diff(file_line0).astype(np.int64)
+    lf = np.repeat(np.arange(len(per_file)), per_file)
+    cap_l = capw[lf]
+    nrows = np.ones(n_lines, np.int64)
+    breaks = {}                                   # line -> the columns its rows start at
+    for i in np.flatnonzero(line_w > cap_l + 1e-9):
+        o0, o1 = int(line_off[i]), int(line_off[i + 1])
+        w = char_w[o0:o1]
+        cols, start, room = [0], 0, float(cap_l[i])
+        acc = 0.0
+        for j in range(o1 - o0):
+            if acc + w[j] > room + 1e-9 and j > start:
+                cols.append(j)
+                start, acc, room = j, 0.0, float(cap_l[i]) - hang_w
+            acc += w[j]
+        breaks[i] = cols
+        nrows[i] = len(cols)
+    line_row0 = np.concatenate(([0], np.cumsum(nrows)))
+    n_rows = int(line_row0[-1])
+    row_line = np.repeat(np.arange(n_lines), nrows)
+    ri = np.arange(n_rows) - np.repeat(line_row0[:-1], nrows)
+    first = ri == 0
+    col0 = np.zeros(n_rows, np.int64)
+    for i, cols in breaks.items():
+        col0[line_row0[i]:line_row0[i + 1]] = cols
+    L = np.diff(line_off).astype(np.int64)[row_line]
+    nxt = np.concatenate((col0[1:], [0]))
+    last = np.concatenate((row_line[1:] != row_line[:-1], [True]))
+    row_len = np.where(last, L - col0, nxt - col0)
+    return line_row0, row_line, col0, np.maximum(row_len, 0), first
+
+
+def char_positions(line_off, char_w, line_row0, row_line, row_col0, row_len):
+    """(char_x, row_width): every character's x within its row and every
+    row's width, in line heights, for a proportional face."""
+    start = np.concatenate(([0.0], np.cumsum(char_w)))       # each character's start in the corpus
+    row_start = line_off[row_line].astype(np.int64) + row_col0.astype(np.int64)
+    row_end = row_start + row_len.astype(np.int64)
+    char_row = np.repeat(np.arange(len(row_line)), row_len.astype(np.int64))
+    char_x = start[:-1] - start[row_start][char_row]
+    row_width = start[row_end] - start[row_start]
+    return char_x.astype(np.float32), row_width.astype(np.float32)
+
+
+def row_positions(file_rect, file_row0, pitch, rows, colw, row_first, hang_w):
+    """Top left of every row's cell; a continuation row hangs in by hang_w
+    line heights."""
     n_rows = len(row_first)
     per_file = np.diff(file_row0).astype(np.int64)
     rf = np.repeat(np.arange(len(per_file)), per_file)
     j = np.arange(n_rows) - file_row0[:-1][rf].astype(np.int64)
     c, r = j // rows[rf], j % rows[rf]
-    x = file_rect[rf, 0] + c * colw[rf] + np.where(row_first, 0.0, HANG * pitch[rf] * char_aspect)
+    x = file_rect[rf, 0] + c * colw[rf] + np.where(row_first, 0.0, hang_w * pitch[rf])
     y = file_rect[rf, 1] + pitch[rf] * (1 + r)
     return np.stack([x, y], axis=1)
 
@@ -411,12 +495,12 @@ def render_preview(path, world, dirs, dir_rect, dir_pad, dir_hue, file_rect, fil
         adv = pitch[f] * char_aspect * s
         bar_h = max(p, 1) - 1
         for j in range(a, b, step):
-            ln = int(row_len[j])
-            ind = min(int(row_indent[j]), ln)
-            if ln <= ind:
+            wd = float(row_len[j]) * pitch[f] * s        # row_len holds the row's width in line heights here
+            ind = int(row_indent[j]) * adv
+            if wd <= ind:
                 continue
             lx, ly = row_pos[j, 0] * s, row_pos[j, 1] * s
-            dr.rectangle([lx + ind * adv, ly, lx + ln * adv, ly + bar_h], fill=bar)
+            dr.rectangle([lx + ind, ly, lx + wd, ly + bar_h], fill=bar)
             n_bars += 1
     try:
         font = ImageFont.load_default(size=11)
@@ -438,6 +522,20 @@ def render_preview(path, world, dirs, dir_rect, dir_pad, dir_hue, file_rect, fil
 
 
 # ---------------------------------------------------------------- main
+
+def font_advances(face):
+    """The advances of a face under the repository, in line heights: {"cell":
+    the widest (the atlas cell), "per_glyph": 95 values for ASCII 32..126},
+    and whether they differ."""
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import atlas_font
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), face)
+    asc, desc, adv, _, _ = atlas_font.font_box(path, 0)
+    per, proportional = atlas_font.font_advances(path, 0)
+    line = asc + desc
+    return {"cell": adv / line, "per_glyph": [a / line for a in per]}, proportional
+
 
 def default_char_aspect():
     """atlas_font.py's advance / line box for its default font, else 0.6."""
@@ -471,8 +569,26 @@ def file_weight(z, meta):
 def build_layout(args, z, meta, t0):
     dirs, files = meta["dirs"], meta["files"]
     file_line0, line_len, line_indent = z["file_line0"], z["line_len"], z["line_indent"]
+    line_off = z["line_off"].astype(np.int64)
     file_dir = z["file_dir"].astype(np.int64)
     n_files, n_lines = len(files), len(line_len)
+    # line widths in line heights: characters times the aspect, or, for a
+    # proportional face named by the scheme, the sum of the glyph advances
+    prop, char_w, face = None, None, meta.get("scheme", {}).get("font")
+    if face:
+        advances, proportional = font_advances(face)
+        if proportional:
+            args.char_aspect = advances["cell"]
+            adv = np.zeros(128, np.float64)
+            adv[32:127] = advances["per_glyph"]
+            adv[:32] = adv[127] = adv[63]
+            char_w = adv[np.minimum(z["chars"].astype(np.int64), 127)]
+            prop = (adv, HANG * float(np.mean(advances["per_glyph"])))
+    if prop:
+        start = np.concatenate(([0.0], np.cumsum(char_w)))
+        line_w = start[line_off[1:]] - start[line_off[:-1]]
+    else:
+        line_w = line_len.astype(np.float64) * args.char_aspect
     aspect = parse_aspect(args.aspect)
     world = np.array([WORLD_W, WORLD_W / aspect])
     weight_name, metric = file_weight(z, meta)
@@ -491,8 +607,8 @@ def build_layout(args, z, meta, t0):
     page, book_cols = None, 0
     if flat:
         # a page cell's aspect: the book's line width by its fullest page
-        page = (int(meta.get("page_lines", np.diff(file_line0).max())), int(np.percentile(line_len, 99.5)))
-        aspect_p = page[1] * args.char_aspect / (page[0] + 2)
+        page = (int(meta.get("page_lines", np.diff(file_line0).max())), float(np.percentile(line_w, 99.5)))
+        aspect_p = page[1] / (page[0] + 2)
         if args.book_layout == "parts":
             dir_rect, dir_pad, file_rect, book_cols = book_layout(dirs, world, aspect_p)
         else:
@@ -505,10 +621,30 @@ def build_layout(args, z, meta, t0):
     for d in range(1, n_dirs):
         dir_depth[d] = dir_depth[dirs[d]["parent"]] + 1
 
-    pitch, cols, rows, cap, colw = layout_files(file_rect, file_line0, line_len, args.char_aspect, page)
-    line_row0, row_line, row_col0, row_len, row_first = wrap_rows(file_line0, line_len, cap)
+    pitch, cols, rows, cap, colw, capw = layout_files(file_rect, file_line0, line_len, line_w,
+                                                      args.char_aspect, page, prop)
+    if prop:
+        # the exact wrap can take more rows than the estimate the pitch was
+        # found with: lower the pitch of those files and wrap again until
+        # every file's rows fit its columns
+        fh = file_rect[:, 3] - file_rect[:, 1]
+        for _ in range(8):
+            line_row0, row_line, row_col0, row_len, row_first = wrap_rows_w(file_line0, line_off, char_w, line_w, capw, prop[1])
+            need = -(-np.diff(line_row0[file_line0]).astype(np.int64) // cols)
+            over = need > rows
+            if not over.any():
+                break
+            rows[over] = need[over]
+            pitch[over] = fh[over] / (rows[over] + 2)
+            capw[over] = colw[over] / (1 + GAP) / pitch[over]
+        char_x, row_width = char_positions(line_off, char_w, line_row0, row_line, row_col0, row_len)
+    else:
+        line_row0, row_line, row_col0, row_len, row_first = wrap_rows(file_line0, line_len, cap)
+        char_x = None
+        row_width = (np.minimum(row_len.astype(np.int64), cap[z["line_file"][row_line]].astype(np.int64)) * args.char_aspect).astype(np.float32)
     file_row0 = line_row0[file_line0]
-    row_pos = row_positions(file_rect, file_row0, pitch, rows, colw, row_first, args.char_aspect)
+    row_pos = row_positions(file_rect, file_row0, pitch, rows, colw, row_first,
+                            prop[1] if prop else HANG * args.char_aspect)
     row_indent = np.where(row_first, line_indent[row_line], 0)
     # items in rows: the first row of the start line to the first row of the end line
     f = z["item_file"].astype(np.int64)
@@ -530,8 +666,9 @@ def build_layout(args, z, meta, t0):
              file_weight=np.asarray(metric, np.float64), file_dir=np.asarray(file_dir, np.uint32),
              line_row0=line_row0.astype(np.uint32), row_line=row_line.astype(np.uint32),
              row_col0=row_col0.astype(np.uint16), row_len=row_len.astype(np.uint16),
-             row_pos=row_pos.astype(np.float32),
-             item_rect=irect.astype(np.float32), item_rect_item=iitem.astype(np.uint32))
+             row_pos=row_pos.astype(np.float32), row_width=row_width,
+             item_rect=irect.astype(np.float32), item_rect_item=iitem.astype(np.uint32),
+             **({"char_x": char_x} if char_x is not None else {}))
     jdirs = []
     for d in range(n_dirs):
         label = dirs[d].get("label") or (meta["name"] if d == 0 else os.path.basename(dirs[d]["path"]) + "/")
@@ -542,7 +679,7 @@ def build_layout(args, z, meta, t0):
     with open(os.path.join(args.atlas, "layout.json"), "w") as fh:
         json.dump({"world": [float(world[0]), float(world[1])], "aspect": args.aspect,
                    "weight": weight_name, "flat": bool(flat), "char_aspect": args.char_aspect,
-                   "hang": HANG, "dirs": jdirs}, fh)
+                   "proportional": bool(prop), "font": face, "hang": HANG, "dirs": jdirs}, fh)
 
     sides = np.minimum(file_rect[:, 2] - file_rect[:, 0], file_rect[:, 3] - file_rect[:, 1])
     n_rows = len(row_line)
@@ -555,7 +692,7 @@ def build_layout(args, z, meta, t0):
           f"{int((sides < 0.02).sum())} slivers under 0.02, {time.time() - t0:.2f}s")
     if args.preview:
         render_preview(args.preview, world, jdirs, dir_rect, dir_pad, dir_hue, file_rect,
-                       file_hue, pitch, cols, rows, cap, colw, file_row0, row_pos, row_len,
+                       file_hue, pitch, cols, rows, cap, colw, file_row0, row_pos, row_width,
                        row_indent, args.char_aspect, args.preview_width)
 
 

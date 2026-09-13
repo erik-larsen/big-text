@@ -108,18 +108,23 @@ def font_outlines(font_path, index=0, max_err=0.5, box=None):
     notdef = ".notdef" if ".notdef" in glyph_set else None
     glyphs = {}
     advances = []
+    per_glyph = {}
     for code in range(FIRST, LAST + 1):
         name = cmap.get(code, notdef)
         if name is None:
             glyphs[code] = []
             continue
         advances.append(hmtx[name][0])
+        per_glyph[code] = hmtx[name][0]
         pen = DecomposingRecordingPen(glyph_set)
         glyph_set[name].draw(pen)
         glyphs[code] = contours_from_pen(pen.value, max_err * upem / 1000.0)
-    advance = max(set(advances), key=advances.count) if advances else upem // 2
+    proportional = len(set(advances)) > 1
+    advance = (max(advances) if proportional else max(set(advances), key=advances.count)) if advances else upem // 2
     metrics = {"upem": upem, "ascent": ascent, "descent": descent,
-               "advance": advance, "char_aspect": advance / (ascent + descent)}
+               "advance": advance, "char_aspect": advance / (ascent + descent),
+               "proportional": proportional,
+               "advances": [per_glyph.get(code, advance) / (ascent + descent) for code in range(FIRST, LAST + 1)]}
     return glyphs, metrics
 
 
@@ -279,12 +284,13 @@ def orient(contours):
 
 # ---------------------------------------------------------------- glyph space and bands
 
-def normalize_glyph(contours, metrics):
-    """Font units -> glyph space: x over the advance, y up from the box
+def normalize_glyph(contours, metrics, adv=None):
+    """Font units -> glyph space: x over the advance (the glyph's own for a
+    proportional face, so its box is its advance box), y up from the box
     bottom (the baseline sits at descent / (ascent + descent)). Returns a
     list of contour arrays [n, 3, 2] and the count of control points
     outside the directory's bbox range."""
-    adv = metrics["advance"]
+    adv = metrics["advance"] if adv is None else adv
     height = metrics["ascent"] + metrics["descent"]
     out, clipped = [], 0
     lo, hi = COORD_OFFSET, COORD_OFFSET + COORD_SCALE
@@ -374,7 +380,8 @@ def build_atlas(font_path=DEFAULT_FONT, index=0, min_ppl=12.0, box=None, verbose
     n_curves = clipped = 0
     max_band = n_bands = 0
     for code in range(FIRST, LAST + 1):
-        contours, clip = normalize_glyph(orient(glyphs[code]), metrics)
+        adv = metrics["advances"][code - FIRST] * (metrics["ascent"] + metrics["descent"]) if metrics["proportional"] else None
+        contours, clip = normalize_glyph(orient(glyphs[code]), metrics, max(adv, 1e-6) if adv is not None else None)
         clipped += clip
         locs = []                       # (address, contour) per contour
         for c in contours:

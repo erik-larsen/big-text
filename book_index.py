@@ -41,8 +41,11 @@ from atlas_index import (SPECS, MAX_COLS, TAB, PUNCT, SPACE, _CTRL, tokenize, wr
 
 # the book's colours, Dobbie's: white pages on his demo's blue-grey ground
 # (its clearColor), black text, dark grey bars, the bands in the ground's
-# own colour so parts draw nothing; words and numbers alike
+# own colour so parts draw nothing; words and numbers alike. The face is
+# Literata, a book serif under the OFL, proportional: the layout and the
+# viewer take its advances from the face
 SCHEME = {"ground": "a0a9af", "page": "ffffff", "bar": "5a5e66", "band": "a0a9af",
+          "font": "fonts/Literata-Regular.ttf",
           "kinds": ["000000", "141414", "141414", "141414", "141414", "3a3a3a", "141414", "4a4a4a", "141414", "141414"],
           "items": ["7aa2f7", "e0c080", "d7a0a8", "5fb7b7", "8c909a"]}
 

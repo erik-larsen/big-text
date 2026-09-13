@@ -6,7 +6,10 @@ equal cells: 16 columns, 6 rows for ASCII plus one extra row of UI symbols
 (arrows, the middle dot, the ellipsis) that the viewer's crumb trail and
 status line use. Each cell is `cell` pixels tall (one line pitch) and
 round(cell * A) wide, where A = advance / (ascent + descent) is the
-character aspect the layout stage also uses.
+character aspect the layout stage also uses; for a proportional face the
+advance is the widest glyph's, every glyph drawn from the cell's left edge,
+and the metrics carry each glyph's own advance for the layout and the
+shaders.
 
 The line box is the face's ASCII ink extents: the top of the tallest and
 the bottom of the deepest glyph among 32..126 (JetBrains Mono's dollar and
@@ -35,16 +38,29 @@ EXTRA = [("←", "<"), ("›", ">"), ("·", "."), ("…", "-"),
 ROWS = ROWS_ASCII + 1
 
 
+def font_advances(font_path, index=0):
+    """The advance of every ASCII glyph 32..126 in font units (the notdef's
+    for a missing one), and whether they differ: a proportional face."""
+    tt = TTFont(font_path, fontNumber=index)
+    cmap = tt.getBestCmap()
+    hmtx = tt["hmtx"]
+    adv = [hmtx[cmap.get(c, ".notdef")][0] if cmap.get(c, ".notdef") in hmtx.metrics else 0
+           for c in range(FIRST, LAST + 1)]
+    return adv, len(set(adv)) > 1
+
+
 def font_box(font_path, index):
     """(ascent, descent, advance, units_per_em, have) in font units: the line
     box is the ASCII ink extents (the OS/2 or hhea box only when no glyph has
-    bounds), the advance is M's, `have` the characters the face covers."""
+    bounds), the advance is M's for a monospace face and the widest glyph's
+    for a proportional one, `have` the characters the face covers."""
     tt = TTFont(font_path, fontNumber=index)
     upm = tt["head"].unitsPerEm
     cmap = tt.getBestCmap()
     gs = tt.getGlyphSet()
     from fontTools.pens.boundsPen import BoundsPen
-    adv = tt["hmtx"][cmap.get(ord("M"), ".notdef")][0]
+    advances, proportional = font_advances(font_path, index)
+    adv = max(advances) if proportional else tt["hmtx"][cmap.get(ord("M"), ".notdef")][0]
     top = bottom = None
     for c in range(FIRST, LAST + 1):
         g = cmap.get(c)
@@ -85,7 +101,10 @@ def build_atlas(font_path=DEFAULT_FONT, index=0, cell=64):
         x, y = (k % COLS) * cell_w, (k // COLS) * cell
         draw.text((x, y + baseline), sym if sym in have else alt,
                   font=font, fill=255, anchor="ls")
+    advances, proportional = font_advances(font_path, index)
     metrics = {"cell_w": cell_w, "cell_h": cell, "char_aspect": A,
+               "proportional": proportional,
+               "advances": [a / line for a in advances],      # per glyph, in line heights
                "cols": COLS, "rows": ROWS, "first": FIRST,
                "extra": {sym: ROWS_ASCII * COLS + i
                          for i, (sym, _) in enumerate(EXTRA)},

@@ -48,6 +48,7 @@ import atlas_font  # noqa: E402
 HERE = Path(__file__).resolve().parent
 CHARS_W = 16384          # width of tex_chars / tex_kinds, shared with line.glsl
 TEX_W = 4096             # width of the per-line and per-file textures
+UI_UNIT = 11             # the texture unit of the UI's own glyph atlas
 ZOOM_TAU = 0.12          # glide time constant, seconds
 ZOOM_TICK = math.log(1.2) / ZOOM_TAU    # one wheel unit ends up as x1.2
 ZOOM_VMAX = 12.0         # log-zoom per second at most
@@ -287,6 +288,7 @@ class Viewer:
         self.tint_label = a["index"].get("tint") if self.tint is not None else None
         self.tint_on = self.tint is not None and bool(getattr(args, "tint", False))
         self.hang = int(a["layout"].get("hang", 2))
+        self.prop = bool(a["layout"].get("proportional", False))   # glyphs placed by their own advances
         # projection: 2d is orthographic; 3d is a perspective camera that
         # orbits the focus point (cx, cy) at tilt and yaw; with the heights
         # on, files and directories are extruded by their weight
@@ -304,8 +306,15 @@ class Viewer:
         self.A = float(a["layout"].get("char_aspect", 0.6))
         self.name = a["index"].get("name", Path(args.atlas).name)
         self.attach_atlas(a)
+        # the corpus face's raster atlas, and the UI's own: the bundled monospace
         self.glyphs, self.gm = atlas_font.build_atlas(args.font, args.font_index, 64)
-        self.ui_aspect = self.gm["cell_w"] / self.gm["cell_h"]
+        if args.font == atlas_font.DEFAULT_FONT and args.font_index == 0:
+            self.ui_glyphs, self.ui_gm = self.glyphs, self.gm
+        else:
+            self.ui_glyphs, self.ui_gm = atlas_font.build_atlas(atlas_font.DEFAULT_FONT, 0, 64)
+        self.ui_aspect = self.ui_gm["cell_w"] / self.ui_gm["cell_h"]
+        self.adv = np.zeros(96, np.float32)                        # advances in line heights, ASCII 32..126
+        self.adv[:95] = self.gm["advances"]
         self.vt = load_vector_tier(args.font, args.font_index) if args.vector_text else None
         self.load_seconds = time.perf_counter() - t0
 
@@ -493,8 +502,8 @@ class Viewer:
         vt_src = ""
         if self.vt is not None:
             vt_src = "#define VT_TEXT 1\n" + (HERE / "shaders" / "vt_glyph.glsl").read_text()
-        self.prog = {n: load_program(n, vt_src if n == "line" else "")
-                     for n in ("dir", "file", "line", "rect", "text", "wall")}
+        self.prog = {n: load_program(n, vt_src if n in ("line", "glyph") else "")
+                     for n in ("dir", "file", "line", "rect", "text", "wall", "glyph")}
         self.loc = {n: {} for n in self.prog}
         quad = np.array([[0, 0], [1, 0], [1, 1], [0, 0], [1, 1], [0, 1]], np.float32)
         self.quad_vbo = glGenBuffers(1)
@@ -516,7 +525,7 @@ class Viewer:
         self.tex_kinds = texture_2d(GL_R8UI, GL_RED_INTEGER, GL_UNSIGNED_BYTE,
                                     padded_rows(a["kinds"], CHARS_W))
         gpu += 2 * chars.size
-        self.tex_line_f = self.tex_line_u = self.tex_file_f = self.tex_dir_f = None
+        self.tex_line_f = self.tex_line_u = self.tex_file_f = self.tex_dir_f = self.tex_char_f = None
         gpu += self.upload_layout()
         self.file_u = padded_rows(np.zeros((self.n_files, 4), np.uint8), TEX_W)
         self.tex_file_u = texture_2d(GL_RGBA8UI, GL_RGBA_INTEGER, GL_UNSIGNED_BYTE, self.file_u)
@@ -524,6 +533,12 @@ class Viewer:
         self.tex_glyphs = texture_2d(GL_R8, GL_RED, GL_UNSIGNED_BYTE,
                                      self.glyphs[:, :, None], GL_LINEAR, mipmap=True)
         gpu += int(self.glyphs.nbytes * 4 / 3)
+        if self.ui_glyphs is self.glyphs:
+            self.tex_ui = self.tex_glyphs
+        else:
+            self.tex_ui = texture_2d(GL_R8, GL_RED, GL_UNSIGNED_BYTE,
+                                     self.ui_glyphs[:, :, None], GL_LINEAR, mipmap=True)
+            gpu += int(self.ui_glyphs.nbytes * 4 / 3)
         self.vt_textures = ()
         if self.vt is not None:
             import vt_glyphs
@@ -537,10 +552,19 @@ class Viewer:
         for n, p in self.prog.items():
             glUseProgram(p)
             for i, tex in enumerate(("uChars", "uKinds", "uGlyphs", "uLineF", "uLineU",
-                                     "uFileF", "uFileU", "uDirF", "vt_curves", "vt_bands")):
+                                     "uFileF", "uFileU", "uDirF", "vt_curves", "vt_bands", "uCharF")):
                 loc = glGetUniformLocation(p, tex)
                 if loc >= 0:
-                    glUniform1i(loc, i)
+                    glUniform1i(loc, UI_UNIT if n == "text" and tex == "uGlyphs" else i)
+            loc = glGetUniformLocation(p, "uAdv")
+            if loc >= 0:
+                glUniform1fv(loc, 96, self.adv)
+            loc = glGetUniformLocation(p, "uAdvMax")
+            if loc >= 0:
+                glUniform1f(loc, self.gm["char_aspect"])
+            loc = glGetUniformLocation(p, "uProp")
+            if loc >= 0:
+                glUniform1i(loc, 1 if self.prop else 0)
             loc = glGetUniformLocation(p, "uHue")
             if loc >= 0:
                 glUniform3fv(loc, 12, HUES)
@@ -557,8 +581,8 @@ class Viewer:
                 glUniform1i(loc, 1 if self.band is not None else 0)
             loc = glGetUniformLocation(p, "uGlyph")
             if loc >= 0:
-                glUniform4f(loc, self.gm["cell_w"], self.gm["cell_h"],
-                            self.glyphs.shape[1], self.glyphs.shape[0])
+                gm, g = (self.ui_gm, self.ui_glyphs) if n == "text" else (self.gm, self.glyphs)
+                glUniform4f(loc, gm["cell_w"], gm["cell_h"], g.shape[1], g.shape[0])
             loc = glGetUniformLocation(p, "uCharAspect")
             if loc >= 0:
                 glUniform1f(loc, self.A)
@@ -586,11 +610,29 @@ class Viewer:
         rl = a["row_line"].astype(np.int64)
         lf = np.zeros((n_rows, 4), np.float32)
         lf[:, :2] = a["row_pos"]
-        # z: the row's index within its file, for the rung-0 sampling
+        # z: the row's index within its file, for the rung-0 sampling; w: the
+        # row's width in line heights
         lf[:, 2] = np.arange(n_rows) - a["file_row0"][a["line_file"][rl]].astype(np.int64)
+        if "row_width" in a:
+            lf[:, 3] = a["row_width"]
+        else:
+            cap = a["file_cap"][a["line_file"][rl]].astype(np.int64)
+            lf[:, 3] = np.minimum(a["row_len"].astype(np.int64), cap) * self.A
         buf = padded_rows(lf, TEX_W)
         self.tex_line_f = texture_2d(GL_RGBA32F, GL_RGBA, GL_FLOAT, buf)
         gpu += buf.nbytes
+        if self.prop:                     # per character: its row and its x within the row
+            row_len = a["row_len"].astype(np.int64)
+            if int(row_len.sum()) != self.n_chars:
+                raise SystemExit("error: the layout's rows do not cover the characters; rerun ./atlas_layout.py")
+            cf = np.zeros((self.n_chars, 2), np.float32)
+            cf[:, 0] = np.repeat(np.arange(n_rows, dtype=np.float32), row_len)
+            cf[:, 1] = a["char_x"]
+            if self.tex_char_f is not None:
+                glDeleteTextures(1, [self.tex_char_f])
+            buf = padded_rows(cf, CHARS_W)
+            self.tex_char_f = texture_2d(GL_RG32F, GL_RG, GL_FLOAT, buf)
+            gpu += buf.nbytes
         off = a["line_off"][:-1].astype(np.uint64)[rl] + a["row_col0"].astype(np.uint64)
         first = a["row_col0"] == 0
         indent = np.where(first, a["line_indent"][rl], 0).astype(np.uint32)
@@ -634,9 +676,14 @@ class Viewer:
         """Bind every texture to its unit, the vector tier's two included.
         Called after anything created or re-uploaded a texture: texture
         creation and glTexSubImage2D bind on whatever unit is active."""
-        textures = [self.tex_chars, self.tex_kinds, self.tex_glyphs, self.tex_line_f,
-                    self.tex_line_u, self.tex_file_f, self.tex_file_u, self.tex_dir_f] + list(self.vt_textures)
-        for i, tex in enumerate(textures):
+        units = {0: self.tex_chars, 1: self.tex_kinds, 2: self.tex_glyphs, 3: self.tex_line_f,
+                 4: self.tex_line_u, 5: self.tex_file_f, 6: self.tex_file_u, 7: self.tex_dir_f,
+                 UI_UNIT: self.tex_ui}
+        for i, tex in enumerate(self.vt_textures):
+            units[8 + i] = tex
+        if self.tex_char_f is not None:
+            units[10] = self.tex_char_f
+        for i, tex in units.items():
             glActiveTexture(GL_TEXTURE0 + i)
             glBindTexture(GL_TEXTURE_2D, tex)
         glActiveTexture(GL_TEXTURE0 + 5)
@@ -651,16 +698,33 @@ class Viewer:
 
     def row_of(self, line, col):
         """(visual row, column within the row) of a character of a global
-        line, following the wrap: the first row holds cap columns and each
-        continuation row cap - hang, drawn hang columns in."""
+        line, following the wrap: the row of the line whose first column is
+        the last at or before col."""
         a = self.a
-        line = np.asarray(line, np.int64)
-        col = np.asarray(col, np.int64)
-        cap = a["file_cap"][a["line_file"][line]].astype(np.int64)
-        capw = np.where(cap >= 16, cap, 4096)
-        r = np.where(col < capw, 0, 1 + np.maximum(col - capw, 0) // np.maximum(capw - self.hang, 1))
-        row = np.minimum(a["line_row0"][line].astype(np.int64) + r, a["line_row0"][line + 1].astype(np.int64) - 1)
-        return row, col - a["row_col0"][row].astype(np.int64)
+        line = np.atleast_1d(np.asarray(line, np.int64))
+        col = np.atleast_1d(np.asarray(col, np.int64))
+        r0 = a["line_row0"][line].astype(np.int64)
+        r1 = a["line_row0"][line + 1].astype(np.int64)
+        row = r0.copy()
+        col0 = a["row_col0"]
+        for i in np.flatnonzero(r1 - r0 > 1):
+            row[i] = r0[i] + max(int(np.searchsorted(col0[r0[i]:r1[i]], col[i], side="right")) - 1, 0)
+        return row, col - col0[row].astype(np.int64)
+
+    def col_offset(self, row, rc):
+        """x of column rc of a visual row, from the row's left, in line
+        heights: rc advances for a monospace face; for a proportional one
+        the character's own x, or the row's width at its end."""
+        a = self.a
+        row = np.atleast_1d(np.asarray(row, np.int64))
+        rc = np.atleast_1d(np.asarray(rc, np.int64))
+        if not self.prop:
+            return rc * self.A
+        start = a["line_off"][a["row_line"][row]].astype(np.int64) + a["row_col0"][row].astype(np.int64)
+        n = a["row_len"][row].astype(np.int64)
+        inside = rc < n
+        idx = np.minimum(start + np.minimum(rc, np.maximum(n - 1, 0)), self.n_chars - 1)
+        return np.where(inside, a["char_x"][idx], a["row_width"][row])
 
     def uniform(self, prog, name):
         d = self.loc[prog]
@@ -1231,8 +1295,8 @@ class Viewer:
         destination of a fly-to is at the text rung."""
         p = float(self.a["file_pitch"][f])
         row, rc = self.row_of(line, col)
-        x, y = (float(v) for v in self.a["row_pos"][int(row)])
-        xc, yc = x + int(rc) * p * self.A, y + p / 2
+        x, y = (float(v) for v in self.a["row_pos"][int(row[0])])
+        xc, yc = x + float(self.col_offset(row, rc)[0]) * p, y + p / 2
         hw, hh = cols / 2 * p * self.A, lines / 2 * p
         # keep the centre on the file, so the file under the view centre is
         # this one (the zoom reference and the 3D focus height depend on it)
@@ -1318,7 +1382,13 @@ class Viewer:
             row = int(a["file_row0"][f]) + j
             line = int(a["row_line"][row])
             col0 = int(a["row_col0"][row])
-            col = col0 + col - (0 if col0 == 0 else self.hang)
+            xr = (wx - float(a["row_pos"][row, 0])) / p      # from the row's left, in line heights
+            if self.prop:
+                start = int(a["line_off"][line]) + col0
+                xs = a["char_x"][start:start + int(a["row_len"][row])]
+                col = col0 + max(int(np.searchsorted(xs, xr, side="right")) - 1, 0)
+            else:
+                col = col0 + max(int(xr // self.A), 0)
             j = line - int(a["file_line0"][f])
         return f, j, col
 
@@ -1518,6 +1588,24 @@ class Viewer:
                 glDrawArraysInstanced(GL_TRIANGLES, 0, 6, end - base)
         self.line_draws = len(edges) // 2
 
+    def draw_visible_glyphs(self):
+        """A proportional face: one instanced draw per run of consecutive
+        visible files at the tokens rung or above, one instance per
+        character (glyph.glsl)."""
+        vis = self.visible & (self.rung >= 2)
+        if not vis.any():
+            return
+        edges = np.flatnonzero(np.diff(np.concatenate(([False], vis, [False]))))
+        c0 = self.a["line_off"][self.a["file_line0"]].astype(np.int64)     # first character of each file
+        glUseProgram(self.prog["glyph"])
+        loc = self.uniform("glyph", "uBase")
+        glBindVertexArray(self.quad_vao)
+        for f0, f1 in zip(edges[::2], edges[1::2]):
+            base, end = int(c0[f0]), int(c0[f1])
+            if end > base:
+                glUniform1i(loc, base)
+                glDrawArraysInstanced(GL_TRIANGLES, 0, 6, end - base)
+
     def draw_instanced(self, prog, n):
         glUseProgram(self.prog[prog])
         glBindVertexArray(self.quad_vao)
@@ -1558,7 +1646,7 @@ class Viewer:
         inst[:, 0] = x + np.arange(n) * cw
         inst[:, 1] = y
         inst[:, 2], inst[:, 3] = cw, size
-        inst[:, 4] = [atlas_font.glyph_cell(c, self.gm) for c in text]
+        inst[:, 4] = [atlas_font.glyph_cell(c, self.ui_gm) for c in text]
         inst[:, 5:8] = color
         inst[:, 8] = alpha
         return inst, n * cw
@@ -1616,9 +1704,9 @@ class Viewer:
         p = a["file_pitch"][ff]
         row, rc = self.row_of(r["line"][idx], r["col"][idx])
         pos = a["row_pos"][row].astype(np.float64)
-        rlen = a["row_len"][row].astype(np.float64)
-        c0 = np.minimum(rc, rlen) * p * self.A
-        c1 = np.minimum(rc + r["len"], rlen) * p * self.A
+        rlen = a["row_len"][row].astype(np.int64)
+        c0 = self.col_offset(row, np.minimum(rc, rlen)) * p
+        c1 = self.col_offset(row, np.minimum(rc + r["len"], rlen)) * p
         inst = np.zeros((len(idx), 11), np.float32)
         inst[:, 0] = pos[:, 0] + c0
         inst[:, 1] = pos[:, 1]
@@ -1830,7 +1918,7 @@ class Viewer:
         self.update_per_file()
         # the map in its own viewport, the window minus the panel column
         glViewport(0, int(self.fb_h - self.map_y0 - self.map_h), int(self.map_w), int(self.map_h))
-        for prog in ("dir", "file", "line", "wall"):
+        for prog in ("dir", "file", "line", "wall", "glyph"):
             self.set_camera_uniforms(prog)
         if self.proj == "3d":
             glEnable(GL_DEPTH_TEST)
@@ -1846,6 +1934,8 @@ class Viewer:
         self.draw_instanced("file", self.n_files)
         self.draw_rects(self.band_instances())      # kind bands under the bars
         self.draw_visible_lines()
+        if self.prop:
+            self.draw_visible_glyphs()
         self.draw_rects(self.item_instances())
         self.draw_rects(self.hit_instances())
         glUseProgram(self.prog["file"])          # borders over the text
@@ -1910,11 +2000,12 @@ class Viewer:
             gl = int(self.a["file_line0"][f]) + int(line) - 1
             self.fly_to(self.line_rect(f, gl, int(col) - 1, lines=30, cols=90), complete=True)
             row, rc = self.row_of(gl, int(col) - 1)
-            x, y = (float(v) for v in self.a["row_pos"][int(row)])
+            x, y = (float(v) for v in self.a["row_pos"][int(row[0])])
             p = float(self.a["file_pitch"][f])
+            xa, xb = float(self.col_offset(row, rc)[0]), float(self.col_offset(row, rc + 1)[0])
             self.settle_focus()
             self.camera_matrix()
-            self.cursor_override = self.world_to_screen(x + (int(rc) + 0.5) * p * self.A, y + p / 2,
+            self.cursor_override = self.world_to_screen(x + (xa + xb) / 2 * p, y + p / 2,
                                                         float(self.file_top[f]) * self.z_scale())
             held = True
         return held

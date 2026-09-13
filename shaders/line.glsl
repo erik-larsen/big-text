@@ -21,6 +21,7 @@ uniform float uFocusW;      // clip w at the focus point (1 in 2D)
 uniform float uZScale;
 uniform float uCharAspect;
 uniform int uBase;          // first line of this draw (visible files come in runs)
+uniform int uProp;          // 1: a proportional face; rows at the tokens and text rungs are glyph.glsl's
 out vec2 vUV;
 flat out uvec2 vOff;
 flat out ivec4 vMeta;       // indent, clipped len, rung, flags
@@ -43,13 +44,16 @@ void main() {
     // integer output is left unwritten, so every path writes every output
     int step = int(fu.z) | (int(fu.w) << 8);
     int j = int(lf.z);
-    bool kill = len == 0 || (rung == 0 && (step < 1 || j % step != 0));
+    bool kill = len == 0 || (rung == 0 && (step < 1 || j % step != 0)) || (uProp == 1 && rung >= 2);
     vec4 meta = texelFetch(uFileF, tc(3 * f + 1), 0);
     vec4 zz = texelFetch(uFileF, tc(3 * f + 2), 0);
     float p = meta.x;
     float lenc = min(float(len), meta.z);
     vec2 p0 = lf.xy;
-    vec2 p1 = p0 + vec2(lenc * p * uCharAspect, rung == 0 ? 1.0 / uScale : p);
+    // the row's width in line heights (lf.w) from the layout: the clipped
+    // character count times the aspect for a monospace face, the sum of the
+    // advances for a proportional one
+    vec2 p1 = p0 + vec2(lf.w * p, rung == 0 ? 1.0 / uScale : p);
     kill = kill || p1.x < uView.x || p0.x > uView.z || p1.y < uView.y || p0.y > uView.w;
     float z = (zz.x + zz.y) * uZScale + 0.04;
     gl_Position = kill ? vec4(-2.0, -2.0, 0.0, 1.0) : uMVP * vec4(mix(p0, p1, aQuad), z, 1.0);
@@ -96,13 +100,16 @@ void main() {
     // bar brightness ramps with pixels per line across the rung 0/1 cut,
     // so only the sampling changes at one pixel per line, not the look
     float bara = clamp(0.5 + 0.15 * vPpl, 0.55, 0.8);
+    // the indent as a fraction of the row: indent columns over the clipped
+    // length (a proportional row's indent is spaces, uniform enough)
+    float indf = lenc > 0.0 ? float(indent) / lenc : 0.0;
     if (rung == 0) {                        // a sampled line: one pixel row
-        if (col < indent) discard;
+        if (vUV.x < indf) discard;
         frag = vec4(uBar * dim, bara);
         return;
     }
     if (rung == 1) {
-        if (col < indent || vUV.y > barf) discard;
+        if (vUV.x < indf || vUV.y > barf) discard;
         frag = vec4(uBar * dim, bara);
         return;
     }

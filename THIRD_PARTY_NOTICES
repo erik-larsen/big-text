@@ -4,6 +4,8 @@ Slug reference shaders. The repository is pinned as the slug/ submodule (commit 
 
 JetBrains Mono. fonts/JetBrainsMonoNL-Regular.ttf is JetBrains Mono 2.304, the no-ligatures face, Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono), licensed under the SIL Open Font License, Version 1.1 (fonts/OFL.txt, authors in fonts/AUTHORS.txt). The glyph atlases the viewer builds from it at run time are embeddings in the OFL's sense.
 
+Literata. fonts/Literata-Regular.ttf is the Regular instance at the 12 pt optical size of Literata 3.103, cut from the variable font with fontTools, Copyright 2017 The Literata Project Authors (https://github.com/googlefonts/literata), licensed under the SIL Open Font License, Version 1.1 (fonts/Literata-OFL.txt, authors in fonts/Literata-AUTHORS.txt). The atlases the viewer builds from it at run time are embeddings in the OFL's sense.
+
 Will Dobbie's GPU text technique. The atlas format and the two-tier glyph design are described in his posts (https://wdobbie.com/post/gpu-text-rendering-with-vector-textures/, https://wdobbie.com/post/war-and-peace-and-webgl/) and are reimplemented here from those descriptions; no code or data of his is used.
 
 Submodules. big-picture (Erik Larsen, MIT), HEPR (soadzoor, MIT) and Slug (above) are pinned as git submodules and carry their own licence files; big-text reads them as references and does not copy their code beyond the Slug shader named above.
