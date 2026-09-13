@@ -245,13 +245,13 @@ def run_search(atlas, word):
     return {"file": file, "line": line, "col": col, "len": len(w), "word": word}
 
 
-def load_vector_tier(font, index):
+def load_vector_tier(font, index, leading=1.0):
     """(curves, bands, metrics) of the vector glyph tier for the font, built
     in the same line box as the raster atlas so both tiers draw a glyph at
     the same size and baseline, with its bands widened for VT_MIN_PPL;
     cached under data/."""
     import vt_glyphs
-    asc, desc, _, _, _ = atlas_font.font_box(font, index)
+    asc, desc, _, _, _ = atlas_font.font_box(font, index, leading)
     cache = HERE / "data" / f"vt_{Path(font).stem.lower()}_{index}_{asc}_{desc}_{VT_MIN_PPL:g}.npz"
     if cache.exists():
         return vt_glyphs.load(cache)
@@ -280,6 +280,7 @@ class Viewer:
         self.bar = rgb(sc["bar"].lstrip("#"))
         self.band = rgb(sc["band"].lstrip("#")) if sc.get("band") else None   # one colour for every band, else the hues
         self.ink = np.array(sc["ink"], np.float32)     # bars' alpha far and near, the word blocks' alpha
+        self.leading = float(sc.get("leading", 1.0))   # the line box over the ink extents: a book's air between lines
         self.kind_colors = np.array([rgb(h.lstrip("#")) for h in sc["kinds"]], np.float32)
         self.item_colors = {k + 1: rgb(h.lstrip("#")) for k, h in enumerate(sc["items"])}
         if sc.get("font") and args.font == atlas_font.DEFAULT_FONT:
@@ -308,15 +309,15 @@ class Viewer:
         self.name = a["index"].get("name", Path(args.atlas).name)
         self.attach_atlas(a)
         # the corpus face's raster atlas, and the UI's own: the bundled monospace
-        self.glyphs, self.gm = atlas_font.build_atlas(args.font, args.font_index, 64)
-        if args.font == atlas_font.DEFAULT_FONT and args.font_index == 0:
+        self.glyphs, self.gm = atlas_font.build_atlas(args.font, args.font_index, 64, self.leading)
+        if args.font == atlas_font.DEFAULT_FONT and args.font_index == 0 and self.leading == 1.0:
             self.ui_glyphs, self.ui_gm = self.glyphs, self.gm
         else:
             self.ui_glyphs, self.ui_gm = atlas_font.build_atlas(atlas_font.DEFAULT_FONT, 0, 64)
         self.ui_aspect = self.ui_gm["cell_w"] / self.ui_gm["cell_h"]
         self.adv = np.zeros(96, np.float32)                        # advances in line heights, ASCII 32..126
         self.adv[:95] = self.gm["advances"]
-        self.vt = load_vector_tier(args.font, args.font_index) if args.vector_text else None
+        self.vt = load_vector_tier(args.font, args.font_index, self.leading) if args.vector_text else None
         self.load_seconds = time.perf_counter() - t0
 
         self.open_window()

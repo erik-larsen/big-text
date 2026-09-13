@@ -38,7 +38,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from atlas_index import (SPECS, MAX_COLS, TAB, PUNCT, SPACE, COMMENT, _CTRL, tokenize, write_index)  # noqa: E402
-from atlas_layout import font_advances  # noqa: E402
+from atlas_layout import font_advances, PAGE_MARGIN  # noqa: E402
 
 # the book's colours, Dobbie's: white pages on his demo's blue-grey ground
 # (its clearColor), black text, dark grey bars, the bands in the ground's
@@ -47,6 +47,9 @@ from atlas_layout import font_advances  # noqa: E402
 # viewer take its advances from the face
 SCHEME = {"ground": "a0a9af", "page": "ffffff", "bar": "000000", "band": "a0a9af",
           "font": "fonts/Literata-Regular.ttf",
+          # the line box stretched to a book's leading, and set type: lines
+          # flush to the margin by widening their word gaps
+          "leading": 1.3, "justify": True,
           # ink: the alpha of the bars far and near, and of the word blocks: a
           # page seen from far reads as the pale grey of averaged text
           "ink": [0.22, 0.22, 0.4],
@@ -79,10 +82,11 @@ def header_field(lines, key):
 
 
 class Measure:
-    """Line widths in the book's face, in line heights, for the footer and
-    the centred headings: the face's advances from atlas_layout.font_advances."""
-    def __init__(self, face):
-        adv, _ = font_advances(face)
+    """Line widths in the book's face, in line heights, for the reflow, the
+    footer and the centred headings: the face's advances from
+    atlas_layout.font_advances, in the scheme's leading."""
+    def __init__(self, face, leading=1.0):
+        adv, _ = font_advances(face, leading)
         self.adv = [0.0] * 128
         self.adv[32:127] = adv["per_glyph"]
         self.space = self.adv[32]
@@ -219,6 +223,55 @@ def index_page(relpath, lines, footer=False):
             line_len.astype(np.uint16), line_indent.astype(np.uint16), int((chars != 32).sum()), [])
 
 
+REFLOW_MIN = 60            # a paragraph is reflowed only when a line of it is this long: prose, not verse or a contents list
+
+
+def reflow(lines, measure, width):
+    """Gutenberg's lines re-broken to `width` line heights in the face:
+    every paragraph (a run of non-blank lines) whose longest line reaches
+    REFLOW_MIN characters is joined and filled greedily, word by word; the
+    contents list, verse and headings keep their lines."""
+    out, para = [], []
+
+    def flush():
+        if not para:
+            return
+        if max(len(ln) for ln in para) < REFLOW_MIN:
+            out.extend(para)
+        else:
+            words = " ".join(ln.strip() for ln in para).split()
+            line, w = [], 0.0
+            for word in words:
+                ww = measure.width(word)
+                if line and w + measure.space + ww > width:
+                    out.append(" ".join(line))
+                    line, w = [word], ww
+                else:
+                    w += (measure.space if line else 0.0) + ww
+                    line.append(word)
+            if line:
+                out.append(" ".join(line))
+        para.clear()
+
+    for ln in lines:
+        if ln.strip():
+            para.append(ln.rstrip())
+        else:
+            flush()
+            out.append("")
+    flush()
+    return out
+
+
+def letter_width(page_lines, aspect):
+    """The text width in line heights that makes a page of page_lines
+    lines, a blank and a footer, inside PAGE_MARGIN, a page of `aspect`
+    (width over height): Letter by default."""
+    mx, mt, mb = PAGE_MARGIN
+    rows = page_lines + 2
+    return aspect * (1 - 2 * mx) / (1 - mt - mb) * (rows + 2)
+
+
 def page_width(parts, measure):
     """The book's line width in line heights: the 99.5th percentile of its
     lines' widths in the face, the width the footer spans and headings
@@ -292,9 +345,13 @@ def main():
                     help="fetch ebook N from gutenberg.org into data/gutenberg/ (once) instead")
     ap.add_argument("--out", default=None, help="output dir (default: data/<name>_atlas)")
     ap.add_argument("--name", default=None, help="corpus name (default: from --out, else the file name)")
-    ap.add_argument("--page-lines", type=int, default=52,
-                    help="lines per page (default 52: War and Peace makes 1401 pages, Dobbie's "
-                         "reflowed pages numbered 1273)")
+    ap.add_argument("--page-lines", type=int, default=40,
+                    help="lines per page (default 40, as Dobbie's Letter pages)")
+    ap.add_argument("--page-aspect", default="612:792",
+                    help="the page's width over its height (default Letter, 612:792); the prose is "
+                         "reflowed to the line width that makes it")
+    ap.add_argument("--no-reflow", action="store_true",
+                    help="keep Gutenberg's own line breaks instead of reflowing the prose to the page")
     ap.add_argument("--front", default="Front matter", help="label of the part before the first heading")
     args = ap.parse_args()
     if args.gutenberg is not None:
@@ -319,9 +376,14 @@ def main():
     # Gutenberg writes honorifics lowercase before the name (`graf Leo Tolstoy`)
     author = " ".join(w for i, w in enumerate(author.split()) if not (w.islower() and i == 0))
     lines = body_lines(text)
+    measure = Measure(SCHEME["font"], SCHEME.get("leading", 1.0))
+    if not args.no_reflow:
+        a, b = args.page_aspect.split(":")
+        width = letter_width(args.page_lines, float(a) / float(b))
+        lines = reflow(lines, measure, width)
     parts = split_book(lines, args.front)
-    measure = Measure(SCHEME["font"])
-    width = page_width(parts, measure)
+    if args.no_reflow:
+        width = page_width(parts, measure)
     dirs, files, file_dir, results = build(parts, args.page_lines, args.name, measure, width, author, book_title)
     skipped = {"binary": 0, "large": 0, "submodules": 0}
     seconds = round(time.time() - t0, 2)

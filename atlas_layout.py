@@ -404,15 +404,28 @@ def wrap_rows_w(file_line0, line_off, char_w, line_w, capw, hang_w):
     return line_row0, row_line, col0, np.maximum(row_len, 0), first
 
 
-def char_positions(line_off, char_w, line_row0, row_line, row_col0, row_len):
+def char_positions(line_off, char_w, line_row0, row_line, row_col0, row_len, justify=None, chars=None):
     """(char_x, row_width): every character's x within its row and every
-    row's width, in line heights, for a proportional face."""
+    row's width, in line heights, for a proportional face. `justify`, when
+    given, is (row mask, target width per row): those rows are stretched to
+    the target by widening their word gaps evenly, as set type is."""
     start = np.concatenate(([0.0], np.cumsum(char_w)))       # each character's start in the corpus
     row_start = line_off[row_line].astype(np.int64) + row_col0.astype(np.int64)
     row_end = row_start + row_len.astype(np.int64)
     char_row = np.repeat(np.arange(len(row_line)), row_len.astype(np.int64))
     char_x = start[:-1] - start[row_start][char_row]
     row_width = start[row_end] - start[row_start]
+    if justify is not None:
+        mask, target = justify
+        is_space = (chars == 32).astype(np.int64)
+        cum = np.concatenate(([0], np.cumsum(is_space)))       # spaces before each character
+        gaps = cum[row_end] - cum[row_start]                   # word gaps per row
+        extra = target - row_width
+        ok = mask & (gaps > 0) & (extra > 0) & (extra < 0.35 * np.maximum(target, 1e-9))
+        add = np.where(ok, extra / np.maximum(gaps, 1), 0.0)
+        before = cum[:-1] - cum[row_start][char_row]           # gaps before this character in its row
+        char_x = char_x + add[char_row] * before
+        row_width = np.where(ok, target, row_width)
     return char_x.astype(np.float32), row_width.astype(np.float32)
 
 
@@ -530,15 +543,15 @@ def render_preview(path, world, dirs, dir_rect, dir_pad, dir_hue, file_rect, fil
 
 # ---------------------------------------------------------------- main
 
-def font_advances(face):
-    """The advances of a face under the repository, in line heights: {"cell":
-    the widest (the atlas cell), "per_glyph": 95 values for ASCII 32..126},
-    and whether they differ."""
+def font_advances(face, leading=1.0):
+    """The advances of a face under the repository, in line heights (the
+    ink box stretched by `leading`): {"cell": the widest (the atlas cell),
+    "per_glyph": 95 values for ASCII 32..126}, and whether they differ."""
     import sys
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import atlas_font
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), face)
-    asc, desc, adv, _, _ = atlas_font.font_box(path, 0)
+    asc, desc, adv, _, _ = atlas_font.font_box(path, 0, leading)
     per, proportional = atlas_font.font_advances(path, 0)
     line = asc + desc
     return {"cell": adv / line, "per_glyph": [a / line for a in per]}, proportional
@@ -581,9 +594,10 @@ def build_layout(args, z, meta, t0):
     n_files, n_lines = len(files), len(line_len)
     # line widths in line heights: characters times the aspect, or, for a
     # proportional face named by the scheme, the sum of the glyph advances
-    prop, char_w, face = None, None, meta.get("scheme", {}).get("font")
+    scheme = meta.get("scheme", {})
+    prop, char_w, face = None, None, scheme.get("font")
     if face:
-        advances, proportional = font_advances(face)
+        advances, proportional = font_advances(face, float(scheme.get("leading", 1.0)))
         if proportional:
             args.char_aspect = advances["cell"]
             adv = np.zeros(128, np.float64)
@@ -651,7 +665,22 @@ def build_layout(args, z, meta, t0):
             rows[over] = need[over]
             pitch[over] = fh[over] / (rows[over] + 2)
             capw[over] = colw[over] / (1 + GAP) / pitch[over]
-        char_x, row_width = char_positions(line_off, char_w, line_row0, row_line, row_col0, row_len)
+        justify = None
+        if scheme.get("justify"):
+            # a row is set flush when its line has more lines of its paragraph
+            # after it: the next line of the file is not blank, and the line
+            # itself starts at the margin (a centred heading does not)
+            n_l = len(line_len)
+            lf_ = z["line_file"].astype(np.int64)
+            same_file = np.concatenate((lf_[1:] == lf_[:-1], [False]))
+            next_full = np.zeros(n_l, bool)
+            next_full[:-1] = line_len[1:] > 0
+            line_ok = same_file & next_full & (line_indent == 0) & (line_len > 0)
+            last_row = np.concatenate((row_line[1:] != row_line[:-1], [True]))
+            row_ok = np.where(last_row, line_ok[row_line], True)   # a wrapped line's earlier rows are always set flush
+            justify = (row_ok, capw[z["line_file"][row_line]])
+        char_x, row_width = char_positions(line_off, char_w, line_row0, row_line, row_col0, row_len,
+                                           justify, z["chars"])
     else:
         line_row0, row_line, row_col0, row_len, row_first = wrap_rows(file_line0, line_len, cap)
         char_x = None

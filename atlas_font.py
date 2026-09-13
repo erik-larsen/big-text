@@ -49,11 +49,12 @@ def font_advances(font_path, index=0):
     return adv, len(set(adv)) > 1
 
 
-def font_box(font_path, index):
+def font_box(font_path, index, leading=1.0):
     """(ascent, descent, advance, units_per_em, have) in font units: the line
     box is the ASCII ink extents (the OS/2 or hhea box only when no glyph has
-    bounds), the advance is M's for a monospace face and the widest glyph's
-    for a proportional one, `have` the characters the face covers."""
+    bounds), stretched by `leading` (a book's air between lines, half above
+    and half below), the advance is M's for a monospace face and the widest
+    glyph's for a proportional one, `have` the characters the face covers."""
     tt = TTFont(font_path, fontNumber=index)
     upm = tt["head"].unitsPerEm
     cmap = tt.getBestCmap()
@@ -78,12 +79,16 @@ def font_box(font_path, index):
         else:
             top, bottom = tt["hhea"].ascent, -tt["hhea"].descent
     have = {chr(c) for c in cmap}
-    return top, max(bottom, 0), adv, upm, have
+    bottom = max(bottom, 0)
+    if leading != 1.0:
+        extra = (leading - 1.0) * (top + bottom)
+        top, bottom = int(round(top + extra / 2)), int(round(bottom + extra / 2))
+    return top, bottom, adv, upm, have
 
 
-def build_atlas(font_path=DEFAULT_FONT, index=0, cell=64):
+def build_atlas(font_path=DEFAULT_FONT, index=0, cell=64, leading=1.0):
     """Rasterise the atlas. Returns (coverage uint8 [h, w], metrics dict)."""
-    asc, desc, adv, upm, have = font_box(font_path, index)
+    asc, desc, adv, upm, have = font_box(font_path, index, leading)
     line = asc + desc
     A = adv / line
     cell_w = int(round(cell * A))
@@ -105,6 +110,7 @@ def build_atlas(font_path=DEFAULT_FONT, index=0, cell=64):
     metrics = {"cell_w": cell_w, "cell_h": cell, "char_aspect": A,
                "proportional": proportional,
                "advances": [a / line for a in advances],      # per glyph, in line heights
+               "leading": leading,
                "cols": COLS, "rows": ROWS, "first": FIRST,
                "extra": {sym: ROWS_ASCII * COLS + i
                          for i, (sym, _) in enumerate(EXTRA)},
