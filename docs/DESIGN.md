@@ -466,7 +466,7 @@ Results (README, Implementation): against exact coverage the Slug tier's ink err
 
 `dobbie/fetch.sh` was exercised: two files deleted and fetched again, twelve verified. The indexer, the layout, the viewer and every test run with no font on the machine. The screenshots were regenerated with the bundled face and the vector tier on; the layouts were rebuilt for its character aspect (0.5714 against Menlo's 0.5711 under the same ink-box rule, so nothing visible moved). `THIRD_PARTY_NOTICES` lists Slug, JetBrains Mono, the Dobbie demos (not included) and the submodules.
 
-The history rewrite was done on 2026-09-12, before publication: `git filter-repo --invert-paths` on `dobbie/pdf` and `dobbie/warandpeace` in a fresh clone, plus a blob callback that replaced the port's shader blob with a three-line note; the commit count and the current tree are unchanged, and a bundle of the pre-rewrite history is kept outside the repository. GitHub may hold the old objects as unreachable for a while; asking GitHub Support to purge them is the documented step if that matters.
+The history rewrite was done on 2026-09-12, before publication: `git filter-repo --invert-paths` on `dobbie/pdf` and `dobbie/warandpeace` in a fresh clone, plus a blob callback that replaced the port's shader blob with a three-line note; the commit count and the current tree are unchanged, and a bundle of the pre-rewrite history is kept outside the repository. Rather than asking GitHub Support to purge the unreachable pre-rewrite objects, the GitHub repository was deleted and recreated on 2026-09-13 and the rewritten history pushed into the empty one; a pre-rewrite commit hash now returns "No commit found".
 
 ## Found in the phase 6 demo
 
