@@ -50,9 +50,11 @@ SCHEME = {"ground": "a0a9af", "page": "ffffff", "bar": "000000", "band": "a0a9af
           # the line box stretched to a book's leading, and set type: lines
           # flush to the margin by widening their word gaps
           "leading": 1.3, "justify": True,
-          # ink: the alpha of the bars far and near, and of the word blocks: a
-          # page seen from far reads as the pale grey of averaged text
-          "ink": [0.22, 0.22, 0.4],
+          # ink: the alpha of the bars far and near, and of the word blocks,
+          # set to the text's own mean ink so nothing steps at a cut: Literata
+          # covers 15.6 percent of a glyph's box over the book's letters, bars
+          # and blocks stand 0.7 tall, and bars span the spaces (23 percent)
+          "ink": [0.17, 0.17, 0.22],
           "kinds": ["000000", "141414", "141414", "141414", "141414", "6a6a6a", "141414", "4a4a4a", "141414", "141414"],
           "items": ["7aa2f7", "e0c080", "d7a0a8", "5fb7b7", "8c909a"]}
 
