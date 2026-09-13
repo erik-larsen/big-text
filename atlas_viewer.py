@@ -71,7 +71,7 @@ def rgb(h):
 
 
 # the default scheme, the code atlas's: an index.json "scheme" overrides any key
-SCHEME = {"ground": "1c1c1e", "page": "111114", "bar": "a4a8b0",
+SCHEME = {"ground": "1c1c1e", "page": "111114", "bar": "a4a8b0", "ink": [0.55, 0.8, 1.0],
           "kinds": ["000000", "cfd2d8", "7aa2f7", "e0c080", "d7a0a8", "7f9f7f", "f0a060", "8c909a", "7fc8c8", "c8d08c"],
           "items": ["7aa2f7", "e0c080", "d7a0a8", "5fb7b7", "8c909a"]}
 HUES = np.array([rgb(h) for h in ("6a8fd8", "4fb3a6", "7fbf6a", "e08a4a", "d8c050",
@@ -279,6 +279,7 @@ class Viewer:
         self.page = rgb(sc["page"].lstrip("#"))
         self.bar = rgb(sc["bar"].lstrip("#"))
         self.band = rgb(sc["band"].lstrip("#")) if sc.get("band") else None   # one colour for every band, else the hues
+        self.ink = np.array(sc["ink"], np.float32)     # bars' alpha far and near, the word blocks' alpha
         self.kind_colors = np.array([rgb(h.lstrip("#")) for h in sc["kinds"]], np.float32)
         self.item_colors = {k + 1: rgb(h.lstrip("#")) for k, h in enumerate(sc["items"])}
         if sc.get("font") and args.font == atlas_font.DEFAULT_FONT:
@@ -579,6 +580,9 @@ class Viewer:
             loc = glGetUniformLocation(p, "uBandFlat")
             if loc >= 0:
                 glUniform1i(loc, 1 if self.band is not None else 0)
+            loc = glGetUniformLocation(p, "uInk")
+            if loc >= 0:
+                glUniform3f(loc, *self.ink)
             loc = glGetUniformLocation(p, "uGlyph")
             if loc >= 0:
                 gm, g = (self.ui_gm, self.ui_glyphs) if n == "text" else (self.gm, self.glyphs)

@@ -81,6 +81,7 @@ flat in float vPpl;
 out vec4 frag;
 
 uniform vec3 uBar;          // the line bar colour, from the scheme
+uniform vec3 uInk;          // the scheme's ink: the bars' alpha far and near, and the word blocks'
 
 ivec2 tcc(uint o) { return ivec2(int(o & 16383u), int(o >> 14)); }
 
@@ -99,7 +100,7 @@ void main() {
     float barf = max(0.7, min(1.0, 1.0 / vPpl));
     // bar brightness ramps with pixels per line across the LOD 0/1 cut,
     // so only the sampling changes at one pixel per line, not the look
-    float bara = clamp(0.5 + 0.15 * vPpl, 0.55, 0.8);
+    float bara = clamp(0.5 + 0.15 * vPpl, uInk.x, uInk.y);
     // the indent as a fraction of the row: indent columns over the clipped
     // length (a proportional row's indent is spaces, uniform enough)
     float indf = lenc > 0.0 ? float(indent) / lenc : 0.0;
@@ -119,7 +120,7 @@ void main() {
     vec3 kc = uKindColor[int(kind) % 10] * dim;
     if (lod == 2) {
         if (vUV.y > barf) discard;
-        frag = vec4(kc, 1.0);
+        frag = vec4(kc, uInk.z);
         return;
     }
     uint ch = texelFetch(uChars, tcc(o), 0).x;

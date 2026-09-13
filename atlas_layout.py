@@ -28,7 +28,7 @@ WORLD_W = 1600.0
 PAD_FRAC, PAD_MIN, PAD_MAX = 0.015, 0.05, 4.0
 PAD_LINES, PAD_MIN_LINES = 2.0, 0.01   # a treemap directory's padding: about two of its own lines
 PAGE_GAP = 0.08            # a book's gutter between pages, as a fraction of the cell width, as Dobbie's grid
-PAGE_MARGIN = (0.10, 0.08) # a book page's inner margins, as fractions of the page's width and height
+PAGE_MARGIN = (0.075, 0.09, 0.03)   # a book page's margins: left and right, top, bottom, as fractions of the page; the footer sits in the bottom one
 AREA_PER_LINE = 34.0       # world area a line takes at pitch 1: p tall, about 60 characters of 0.57 p wide
 GAP = 0.06                 # column gap as a fraction of the column width
 MAX_COLS = 64
@@ -614,9 +614,9 @@ def build_layout(args, z, meta, t0):
     page, book_cols = None, 0
     if flat:
         # a page cell's aspect: the book's line width by its fullest page
-        page = (int(meta.get("page_lines", np.diff(file_line0).max())), float(np.percentile(line_w, 99.5)))
-        mx, my = PAGE_MARGIN
-        aspect_p = page[1] / (page[0] + 2) * (1 - 2 * my) / (1 - 2 * mx)   # the page around its text block
+        page = (int(meta.get("page_rows", meta.get("page_lines", np.diff(file_line0).max()))), float(np.percentile(line_w, 99.5)))
+        mx, mt, mb = PAGE_MARGIN
+        aspect_p = page[1] / (page[0] + 2) * (1 - mt - mb) / (1 - 2 * mx)   # the page around its text block
         if args.book_layout == "parts":
             dir_rect, dir_pad, file_rect, book_cols = book_layout(dirs, world, aspect_p)
         else:
@@ -632,9 +632,9 @@ def build_layout(args, z, meta, t0):
     # the text block: a book page's inner rectangle, the file itself for code
     file_text = file_rect.copy()
     if flat:
-        mx, my = PAGE_MARGIN
+        mx, mt, mb = PAGE_MARGIN
         w, h = file_rect[:, 2] - file_rect[:, 0], file_rect[:, 3] - file_rect[:, 1]
-        file_text += np.stack([mx * w, my * h, -mx * w, -my * h], axis=1)
+        file_text += np.stack([mx * w, mt * h, -mx * w, -mb * h], axis=1)
     pitch, cols, rows, cap, colw, capw = layout_files(file_text, file_line0, line_len, line_w,
                                                       args.char_aspect, page, prop)
     if prop:

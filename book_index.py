@@ -37,16 +37,20 @@ import urllib.request
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from atlas_index import (SPECS, MAX_COLS, TAB, PUNCT, SPACE, _CTRL, tokenize, write_index)  # noqa: E402
+from atlas_index import (SPECS, MAX_COLS, TAB, PUNCT, SPACE, COMMENT, _CTRL, tokenize, write_index)  # noqa: E402
+from atlas_layout import font_advances  # noqa: E402
 
 # the book's colours, Dobbie's: white pages on his demo's blue-grey ground
 # (its clearColor), black text, dark grey bars, the bands in the ground's
 # own colour so parts draw nothing; words and numbers alike. The face is
 # Literata, a book serif under the OFL, proportional: the layout and the
 # viewer take its advances from the face
-SCHEME = {"ground": "a0a9af", "page": "ffffff", "bar": "5a5e66", "band": "a0a9af",
+SCHEME = {"ground": "a0a9af", "page": "ffffff", "bar": "000000", "band": "a0a9af",
           "font": "fonts/Literata-Regular.ttf",
-          "kinds": ["000000", "141414", "141414", "141414", "141414", "3a3a3a", "141414", "4a4a4a", "141414", "141414"],
+          # ink: the alpha of the bars far and near, and of the word blocks: a
+          # page seen from far reads as the pale grey of averaged text
+          "ink": [0.22, 0.22, 0.4],
+          "kinds": ["000000", "141414", "141414", "141414", "141414", "6a6a6a", "141414", "4a4a4a", "141414", "141414"],
           "items": ["7aa2f7", "e0c080", "d7a0a8", "5fb7b7", "8c909a"]}
 
 PART_RX = re.compile(r"^(?:(?:BOOK|PART|VOLUME)\s+[A-Z0-9]+\b|(?:FIRST|SECOND|THIRD)\s+EPILOGUE\b"
@@ -62,6 +66,33 @@ ASCII_MAP = str.maketrans({"“": '"', "”": '"', "‘": "'", "’": "'",
                            "—": "--", "–": "-", "…": "...", "•": "*",
                            "™": "(TM)", "œ": "oe", "Œ": "OE", "æ": "ae",
                            "Æ": "AE", "ß": "ss", " ": " "})
+
+
+def header_field(lines, key):
+    """`Title: War and Peace` from Gutenberg's header, or None."""
+    rx = re.compile(r"^" + key + r":\s*(.+?)\s*$")
+    for ln in lines[:200]:
+        m = rx.match(ln)
+        if m:
+            return m.group(1)
+    return None
+
+
+class Measure:
+    """Line widths in the book's face, in line heights, for the footer and
+    the centred headings: the face's advances from atlas_layout.font_advances."""
+    def __init__(self, face):
+        adv, _ = font_advances(face)
+        self.adv = [0.0] * 128
+        self.adv[32:127] = adv["per_glyph"]
+        self.space = self.adv[32]
+
+    def width(self, text):
+        return sum(self.adv[ord(c)] if ord(c) < 128 else self.adv[63] for c in to_ascii(text))
+
+    def spaces(self, w, floor=False):
+        n = int(w / self.space) if floor else int(round(w / self.space))
+        return max(n, 1)
 
 
 def to_ascii(text):
@@ -163,8 +194,10 @@ def pages_of(lines, page_lines):
     return pages
 
 
-def index_page(relpath, lines):
-    """The ("ok", ...) tuple atlas_index.index_file returns, for prose."""
+def index_page(relpath, lines, footer=False):
+    """The ("ok", ...) tuple atlas_index.index_file returns, for prose. With
+    `footer` the last line is the running footer, in the comment kind so
+    the scheme can grey it."""
     raw = [to_ascii(ln).expandtabs(TAB).encode("ascii").translate(_CTRL).rstrip()[:MAX_COLS]
            for ln in lines]
     joined = b"\n".join(raw)
@@ -174,6 +207,11 @@ def index_page(relpath, lines):
     cf = np.frombuffer(joined, np.uint8)
     kf = np.frombuffer(bytes(kinds), np.uint8).copy()
     kf[(cf == 32) & (kf == PUNCT)] = SPACE
+    if footer and len(raw):
+        tail = len(raw[-1])
+        if tail:
+            last = kf[-tail:]
+            last[(cf[-tail:] != 32)] = COMMENT
     keep = cf != 10
     chars, kinds = cf[keep], kf[keep]
     nbytes = sum(len(ln.encode("utf-8")) + 1 for ln in lines)
@@ -181,12 +219,33 @@ def index_page(relpath, lines):
             line_len.astype(np.uint16), line_indent.astype(np.uint16), int((chars != 32).sum()), [])
 
 
-def build(parts, page_lines, name):
+def page_width(parts, measure):
+    """The book's line width in line heights: the 99.5th percentile of its
+    lines' widths in the face, the width the footer spans and headings
+    centre on."""
+    widths = [measure.width(ln) for _, chapters in parts for _, lines in chapters for ln in lines if ln.strip()]
+    return float(np.percentile(widths, 99.5)) if widths else 40.0
+
+
+def footer_line(measure, width, author, number, title):
+    """`Leo Tolstoy   653   War and Peace`: the author at the left, the
+    number centred, the title flush right on a line `width` line heights
+    wide, spaced with the face's own space."""
+    w_a, w_n, w_t = measure.width(author), measure.width(number), measure.width(title)
+    s1 = measure.spaces(width / 2 - w_a - w_n / 2)
+    s2 = measure.spaces(width - w_a - s1 * measure.space - w_n - w_t, floor=True)   # never past the width
+    return author + " " * s1 + number + " " * s2 + title
+
+
+def build(parts, page_lines, name, measure=None, width=None, author="", book_title=""):
     """dirs, files, file_dir, results in atlas_index's pre-order: the root,
     then each part with its pages. Chapters are not directories, a page's
     path names its chapter (`Book One: 1805/Chapter III/p. 27`), so the
     layout is a grid of pages per part, as printed. A text without any
-    heading is one part named after the corpus, its pages `name/p. N`."""
+    heading is one part named after the corpus, its pages `name/p. N`.
+    Every page is padded to page_lines lines and given a blank line and a
+    running footer, and chapter headings are centred on the page width, as
+    a printed page has them."""
     dirs = [{"path": "", "parent": -1, "children": [], "files": [], "top": 0}]
     files, file_dir, results = [], [], []
     page_no = 0
@@ -205,7 +264,11 @@ def build(parts, page_lines, name):
                 dirs[p]["files"].append(len(files))
                 files.append(rel)
                 file_dir.append(p)
-                results.append(index_page(rel, page))
+                if measure is not None:
+                    page = [(" " * measure.spaces((width - measure.width(ln)) / 2) + ln.strip())
+                            if CHAPTER_RX.match(ln.rstrip()) else ln for ln in page]
+                    page = page + [""] * (page_lines - len(page)) + ["", footer_line(measure, width, author, str(page_no), book_title)]
+                results.append(index_page(rel, page, footer=measure is not None))
     return dirs, files, file_dir, results
 
 
@@ -250,14 +313,22 @@ def main():
     t0 = time.time()
     with open(args.text, "rb") as f:
         text = f.read().decode("utf-8", "replace")
+    header = text.replace("\r\n", "\n").split("\n")
+    book_title = header_field(header, "Title") or args.name
+    author = header_field(header, "Author") or ""
+    # Gutenberg writes honorifics lowercase before the name (`graf Leo Tolstoy`)
+    author = " ".join(w for i, w in enumerate(author.split()) if not (w.islower() and i == 0))
     lines = body_lines(text)
     parts = split_book(lines, args.front)
-    dirs, files, file_dir, results = build(parts, args.page_lines, args.name)
+    measure = Measure(SCHEME["font"])
+    width = page_width(parts, measure)
+    dirs, files, file_dir, results = build(parts, args.page_lines, args.name, measure, width, author, book_title)
     skipped = {"binary": 0, "large": 0, "submodules": 0}
     seconds = round(time.time() - t0, 2)
     stats = write_index(args.out, args.name, os.path.abspath(args.text), dirs, files, file_dir,
                         results, skipped, seconds,
-                        extra={"corpus": "book", "page_lines": args.page_lines, "scheme": SCHEME})
+                        extra={"corpus": "book", "page_lines": args.page_lines, "page_rows": args.page_lines + 2,
+                               "title": book_title, "author": author, "scheme": SCHEME})
     n_chapters = sum(len(c) for _, c in parts)
     print(f"wrote {args.out}/index.npz + index.json: {len(parts)} parts, {n_chapters} chapters, "
           f"{stats['files']} pages, {stats['lines']} lines, {stats['chars'] / 1e6:.2f} M chars "

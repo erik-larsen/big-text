@@ -73,6 +73,7 @@ uniform vec3 uKindColor[10];
 uniform float uVtMin;
 uniform float uAdv[96];
 uniform float uAdvMax;      // the atlas cell's advance in line heights
+uniform vec3 uInk;          // the scheme's ink: z is the word blocks' alpha
 in vec2 vUV;
 flat in int vCode;
 flat in int vKind;
@@ -87,7 +88,7 @@ void main() {
     float barf = max(0.7, min(1.0, 1.0 / vPpl));
     if (lod == 2) {
         if (vUV.y > barf) discard;
-        frag = vec4(kc, 1.0);
+        frag = vec4(kc, uInk.z);
         return;
     }
     vec2 gdx = dFdx(vUV), gdy = dFdy(vUV);

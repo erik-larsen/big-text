@@ -51,7 +51,7 @@ The line numbers in the `--goto` and `--hover` commands are the ones that held w
 
 - `big-text_layout.png`: the layout stage's own render of big-text (29 files, about 7,200 lines): the `docs/`, `tests/` and `shaders/` bands, files as 1 px outlines wrapped into columns, one grey bar per line from indent to length.
 - `emscripten_layout.png`: the same for the whole emscripten tree (11,495 files, 2.80 million lines, 698 directories): nested directory bands in the top-level hue, `test/` and `system/` the largest, big files wrapped into up to 64 columns, tiny files as slivers.
-- `war-and-peace_layout.png`: the book: one grid of 1,401 pages in reading order, 60 across, in gutters, one grey bar per line, a chapter's last page short.
+- `war-and-peace_layout.png`: the book: one grid of 1,401 pages in reading order, 62 across, in gutters, one grey bar per line, a chapter's last page short.
 
 ## big-text (its own source: 29 files, about 7,200 lines)
 
@@ -69,7 +69,7 @@ The whole tree as git tracks it, test suites and system libraries included, at t
 
 ## War and Peace (Project Gutenberg 2600: 18 parts, 366 chapters, 1,401 pages, 63,191 lines, 2.63 million glyphs)
 
-In the book's own scheme, Dobbie's: white pages and black text on his demo's blue-grey ground, the text in Literata, every glyph placed by its own advance. The standard set with `--filter Natasha` (1,213 hits on 299 pages), a book having no tint, plus:
+In the book's own scheme, Dobbie's: white pages and black text on his demo's blue-grey ground, the text in Literata, every glyph placed by its own advance, the pages fading to pale grey as the text gives way to blocks and bars, every page with its running footer. The standard set with `--filter Natasha` (1,213 hits on 299 pages), a book having no tint, plus:
 
 - `war-and-peace/overview.png`: the map fitted: one grid of pages in reading order, the front matter's contents pages first, each page a cell at the line-bars LOD; no part is drawn, the crumb trail names the one under the centre.
 - `war-and-peace/hover.png`: the text view hovered at the centre: the label `Book Eight: 1811 - 12/Chapter IX/p. 657` (part, chapter, page; a book has no items).
