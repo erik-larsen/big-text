@@ -23,7 +23,6 @@ Regenerate everything with:
 ./atlas_viewer.py data/big-text_atlas --goto README.md:219 --zoom 14 --frames 2 --screenshot docs/shots/big-text/wrapped.png
 ./atlas_viewer.py data/big-text_atlas --goto atlas_viewer.py:399 --zoom 120 --frames 3 --screenshot docs/shots/big-text/text_120_raster.png --no-vector-text
 ./atlas_viewer.py data/big-text_atlas --goto atlas_viewer.py:399 --zoom 120 --frames 3 --screenshot docs/shots/big-text/text_120_vector.png
-./tests/bench_vt.py --out /tmp/bench && cp /tmp/bench/stack_12.png docs/shots/vt_bench_12.png && cp /tmp/bench/stack_96.png docs/shots/vt_bench_96.png
 ./atlas_viewer.py data/makepad-draw_atlas --proj 3d --tilt 55 --yaw 12 --color churn --history --goto platform/src/window.rs:1173 --zoom 2.2 --frames 2 --screenshot docs/shots/makepad-draw/hero.png
 ./atlas_viewer.py data/big-text_atlas --proj 3d --tilt 55 --yaw 12 --color churn --history --frames 1 --no-hover --screenshot docs/shots/big-text/hero.png
 ./atlas_viewer.py data/big-text_atlas --proj 3d --tilt 55 --yaw 12 --hover atlas_resolve.py:71:5 --frames 2 --screenshot docs/shots/big-text/3d_text.png

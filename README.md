@@ -233,9 +233,6 @@ Measured on an M4 MacBook at a 2940 by 1640 framebuffer, `--frames 300 --stats` 
 
 The vector tier's error is below the raster tier's even at 12 px, so the handoff `VT_MIN_PPL` is 12 px per line and the raster atlas serves only the 6 to 12 px band of the text rung. Vector text is on by default: at 12 px it costs 0.48 ms per screen against the raster tier's 0.24, and at every larger size the two are within a few hundredths of a millisecond.
 
-![the tiers at 12 px](docs/shots/vt_bench_12.png)
-![the tiers at 96 px](docs/shots/vt_bench_96.png)
-
 Not built: the palette and legend buttons, and a streaming working set; the whole corpus is resident, which is fine to a few million lines.
 
 ## Open questions

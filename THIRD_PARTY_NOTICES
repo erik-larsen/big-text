@@ -4,6 +4,6 @@ Slug reference shaders. The repository is pinned as the slug/ submodule (commit 
 
 JetBrains Mono. fonts/JetBrainsMonoNL-Regular.ttf is JetBrains Mono 2.304, the no-ligatures face, Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono), licensed under the SIL Open Font License, Version 1.1 (fonts/OFL.txt, authors in fonts/AUTHORS.txt). The glyph atlases the viewer builds from it at run time are embeddings in the OFL's sense.
 
-Will Dobbie's GPU text demos. Nothing of them is included. The technique, the atlas format and the two-tier design are described in his posts (https://wdobbie.com/post/gpu-text-rendering-with-vector-textures/, https://wdobbie.com/post/war-and-peace-and-webgl/) and are reimplemented here; the demo files themselves, which carry no licence, are not included and are not needed; they remain on his site.
+Will Dobbie's GPU text technique. The atlas format and the two-tier glyph design are described in his posts (https://wdobbie.com/post/gpu-text-rendering-with-vector-textures/, https://wdobbie.com/post/war-and-peace-and-webgl/) and are reimplemented here from those descriptions; no code or data of his is used.
 
 Submodules. big-picture and dagcmp (Erik Larsen, MIT), makepad (Makepad B.V.; MIT by its LICENSE, its crates declaring MIT OR Apache-2.0, vendored libraries under libs/ with their own), HEPR (soadzoor, MIT) and Slug (above) are pinned as git submodules and carry their own licence files; big-text reads them as corpora and references and does not copy their code.
