@@ -43,7 +43,7 @@ Regenerate everything with:
 
 - `big-text/hero.png`: big-text's own source fitted in 3D at tilt 55 and yaw 12 with the churn lens on and the revision rail shown: the most edited files ember, the roofs at the rungs their sizes allow.
 - `makepad-draw/hero.png`: the same on makepad-draw at 2.2 px per line about `platform/src/window.rs`: the near roofs at the tokens and text rungs, the far ones at bars.
-- `war-and-peace/hero.png`: War and Peace in 3D at tilt 55 and yaw 12, 3 px per line about page 481 (Book Five): the near pages at the text rung, the far rows at bars, the Books as terraces with their labels stacked along the left edge. The README's second image.
+- `war-and-peace/hero.png`: War and Peace in 3D at tilt 55 and yaw 12, 3 px per line about page 481 (Book Five): the near pages at the text rung, the far rows at bars, every full page at one height (the lines metric), a chapter's last page a step down, the Books as terraces with their labels stacked along the left edge. The README's second image.
 
 ## Layout previews
 

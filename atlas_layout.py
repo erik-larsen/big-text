@@ -614,7 +614,9 @@ def build_layout(args, z, meta, metric_name, metric, t0, lens="folders"):
     e_row = line_row0[ge] - file_row0[f]
     irect, iitem = item_rects(z["item_file"], s_row, e_row, file_rect, file_row0, pitch, rows, colw)
 
-    suffix = "_layers" if lens == "layers" else ("" if metric_name == "tokens" else "_" + metric_name)
+    # layout.npz is the layout the viewer opens with: tokens for code, a book's one layout
+    primary = metric_name == "tokens" or meta.get("corpus") == "book"
+    suffix = "_layers" if lens == "layers" else ("" if primary else "_" + metric_name)
     np.savez(os.path.join(args.atlas, f"layout{suffix}.npz"),
              world=world.astype(np.float64),
              dir_rect=dir_rect.astype(np.float64), dir_pad=dir_pad.astype(np.float64),
@@ -686,7 +688,8 @@ def main():
         meta = json.load(f)
     names = ["tokens", "references", "churn", "lines"] if args.metric == "all" else [args.metric]
     if meta.get("corpus") == "book" and args.metric == "all":
-        names = ["tokens"]                # every page is one cell whatever the metric
+        names = ["lines"]                 # every page is one cell whatever the metric; lines
+                                          # keeps full pages level in 3D, only a short last page dips
     for name in names:
         metric = file_metric(name, z, meta["files"], z["file_line0"], args.atlas)
         if metric is None:
