@@ -1556,6 +1556,7 @@ class Viewer:
             self.file_scale = np.ones(self.n_files)
             self.dir_scale = np.ones(self.n_dirs)
         ppl = a["file_pitch"] * self.zoom * self.file_scale
+        self.ppl = ppl
         self.lod = ((ppl >= 1).astype(np.uint8) + (ppl >= 3) + (ppl >= 6)).astype(np.uint8)
         flags = np.zeros(self.n_files, np.uint8)
         cur = self.cursor_override if self.scripted else self.cursor
@@ -1668,12 +1669,13 @@ class Viewer:
         return inst, n * cw
 
     def band_instances(self):
-        """The kind bands: below 3 px per line the item rectangles of visible
-        files are filled bands in the item kind colour, under the sampled
-        bars and the line bars alike so nothing flips at the 1 px cut; from
-        3 px the outlines take over (fills far, outlines near)."""
+        """The kind bands: the item rectangles of visible files are filled
+        bands in the item kind colour, under the sampled bars and the line
+        bars alike so nothing flips at the 1 px cut, at 18 percent up to 3 px
+        per line and fading to nothing by 6, where the outlines, drawn from
+        3, have taken over (fills far, outlines near, and no cut between)."""
         a = self.a
-        m = (self.visible & (self.lod <= 1))[self.item_rect_file]
+        m = (self.visible & (self.lod <= 2))[self.item_rect_file]
         if not m.any():
             return np.zeros((0, 10), np.float32)
         rects = a["item_rect"][m]
@@ -1685,7 +1687,7 @@ class Viewer:
         inst[(kinds < 1) | (kinds > 5), 4:7] = self.item_colors[5]
         inst[:, 7] = 1.0
         inst[:, 8] = 0.0
-        inst[:, 9] = 0.18
+        inst[:, 9] = 0.18 * np.clip((6.0 - self.ppl[self.item_rect_file[m]]) / 3.0, 0.0, 1.0)
         inst[:, 10] = self.file_top[self.item_rect_file[m]] + 0.02
         return inst
 
