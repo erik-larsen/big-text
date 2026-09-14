@@ -54,6 +54,8 @@ ZOOM_TICK = math.log(1.2) / ZOOM_TAU    # one wheel unit ends up as x1.2
 ZOOM_VMAX = 12.0         # log-zoom per second at most
 PANEL_PT = 180           # results panel width in window points
 BAND_PT = 3              # the directory band's greatest width in window points
+BAR_HEIGHT = 0.7         # bars and token blocks stand this much of a row tall (the shaders' barf)
+INK_FAR = 0.55           # the bars' alpha at the far LODs when the scheme names no ink: the die shot
 DBL_CLICK_S = 0.35       # two presses this close in time and place are a double click
 MARGIN_PT = 10           # UI margin in window points
 FLY_RHO = 1.4
@@ -71,7 +73,7 @@ def rgb(h):
 
 
 # the default scheme, the code atlas's: an index.json "scheme" overrides any key
-SCHEME = {"ground": "1c1c1e", "page": "111114", "bar": "a4a8b0", "ink": [0.55, 0.8, 1.0],
+SCHEME = {"ground": "1c1c1e", "page": "111114", "bar": "a4a8b0",
           "kinds": ["000000", "cfd2d8", "7aa2f7", "e0c080", "d7a0a8", "7f9f7f", "f0a060", "8c909a", "7fc8c8", "c8d08c"],
           "items": ["7aa2f7", "e0c080", "d7a0a8", "5fb7b7", "8c909a"]}
 HUES = np.array([rgb(h) for h in ("6a8fd8", "4fb3a6", "7fbf6a", "e08a4a", "d8c050",
@@ -279,7 +281,7 @@ class Viewer:
         self.page = rgb(sc["page"].lstrip("#"))
         self.bar = rgb(sc["bar"].lstrip("#"))
         self.band = rgb(sc["band"].lstrip("#")) if sc.get("band") else None   # one colour for every band, else the hues
-        self.ink = np.array(sc["ink"], np.float32)     # bars' alpha far and near, the word blocks' alpha
+        self.ink = np.array(sc["ink"], np.float32) if sc.get("ink") else None   # bars' alpha far and near, the blocks'; measured below when unset
         self.leading = float(sc.get("leading", 1.0))   # the line box over the ink extents: a book's air between lines
         self.kind_colors = np.array([rgb(h.lstrip("#")) for h in sc["kinds"]], np.float32)
         self.item_colors = {k + 1: rgb(h.lstrip("#")) for k, h in enumerate(sc["items"])}
@@ -317,6 +319,15 @@ class Viewer:
         self.ui_aspect = self.ui_gm["cell_w"] / self.ui_gm["cell_h"]
         self.adv = np.zeros(224, np.float32)                       # advances in line heights, bytes 32..255
         self.adv[:len(self.gm["advances"])] = self.gm["advances"]
+        if self.ink is None:
+            # the scheme names no ink: measure it, the mean coverage of the
+            # face's glyphs over this corpus's characters, so the blocks carry
+            # the ink of the text they stand in for; the bars keep the bright
+            # far view and ease down to the blocks by 3 px per line
+            freq = np.bincount(a["chars"], minlength=256)[32:256]
+            ink, _ = atlas_font.mean_ink(args.font, args.font_index, self.leading, freq)
+            block = ink / BAR_HEIGHT
+            self.ink = np.array([INK_FAR, block * 1.25, block], np.float32)
         self.vt = load_vector_tier(args.font, args.font_index, self.leading) if args.vector_text else None
         self.load_seconds = time.perf_counter() - t0
 
@@ -1928,7 +1939,13 @@ class Viewer:
         if self.proj == "3d":
             glEnable(GL_DEPTH_TEST)
             glDepthFunc(GL_LEQUAL)
+            # the terrace tops sit at the same depth as the files on them (at
+            # every depth with the heights off): push them back a little so
+            # the files never fight them
+            glEnable(GL_POLYGON_OFFSET_FILL)
+            glPolygonOffset(1.0, 2.0)
         self.draw_instanced("dir", self.n_dirs)
+        glDisable(GL_POLYGON_OFFSET_FILL)
         if self.proj == "3d":
             glUseProgram(self.prog["wall"])
             glUniform1i(self.uniform("wall", "uNFiles"), self.n_files)
