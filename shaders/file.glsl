@@ -1,7 +1,7 @@
 // file.glsl: instanced file rectangles. Per instance: tex_file_f (RGBA32F,
 // three texels per file: rect, (pitch, colw, cap, hue), (z base, height,
 // tint, unused)) and tex_file_u (RGBA8UI, one texel per file: (LOD, flags,
-// step lo, step hi); flags bit 0 hovered, bit 1 has hits, bit 2 current hit,
+// 0, 0); flags bit 0 hovered, bit 1 has hits, bit 2 current hit,
 // bit 3 dimmed).
 // Invisible files become a degenerate quad. Every LOD draws
 // the dark file background under the lines (the hue is only in the

@@ -1569,16 +1569,9 @@ class Viewer:
             if self.current_file >= 0:
                 flags[self.current_file] |= 4
             flags[self.dimmed] |= 8
-        # LOD 0 draws every step-th line so the density stays about one
-        # bar per pixel row; the step goes to the shader as two bytes
-        self.file_step = np.ones(self.n_files, np.int64)
-        sub = ppl < 1
-        self.file_step[sub] = np.clip(np.ceil(1.0 / np.maximum(ppl[sub], 1e-9)), 1, 65535)
         fu = self.file_u.reshape(-1, 4)
         fu[:self.n_files, 0] = self.lod
         fu[:self.n_files, 1] = flags
-        fu[:self.n_files, 2] = self.file_step & 255
-        fu[:self.n_files, 3] = self.file_step >> 8
         glActiveTexture(GL_TEXTURE6)
         glBindTexture(GL_TEXTURE_2D, self.tex_file_u)
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, TEX_W, self.file_u.shape[0],

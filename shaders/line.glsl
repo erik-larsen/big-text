@@ -1,10 +1,10 @@
 // line.glsl: instanced line quads. The vertex shader fetches the line
 // (tex_line_f: x, y, file-relative index; tex_line_u: byte offset lo, file,
 // indent | len << 16, byte offset hi), the file's LOD, flags and sampling
-// step (tex_file_u), its pitch and cap and its height (tex_file_f, three
+// (tex_file_u), its pitch and cap and its height (tex_file_f, three
 // texels per file), and emits a degenerate quad for lines outside the
-// view. Positions go through uMVP, at the file's top in 3D. The fragment shader draws the
-// four LODs: 0 every step-th line as a one pixel grey bar (the sampled
+// view and for the rows LOD 0 leaves out. Positions go through uMVP, at the file's top in 3D. The fragment shader draws the
+// four LODs: 0 one line per pixel row as a one pixel grey bar (the sampled
 // overview texture), 1 a grey bar from indent to len, 2 one block per
 // character in the kind colour (token segments), 3 the glyph from the
 // atlas times the kind colour.
@@ -37,36 +37,36 @@ void main() {
     int lod = int(fu.x);
     int len = int(lu.z >> 16);
     vec4 lf = texelFetch(uLineF, tc(i), 0);
-    // LOD 0 (under one device pixel per line) keeps every step-th line of
-    // the file, step = ceil(1 / ppl) from the CPU, about one bar per pixel
-    // row, and draws it exactly one device pixel tall.
     // no early return: Apple's GL driver corrupts the draw when a flat
     // integer output is left unwritten, so every path writes every output
-    int step = int(fu.z) | (int(fu.w) << 8);
     int j = int(lf.z);
-    bool kill = len == 0 || (lod == 0 && (step < 1 || j % step != 0)) || (uProp == 1 && lod >= 2);
     vec4 meta = texelFetch(uFileF, tc(3 * f + 1), 0);
     vec4 zz = texelFetch(uFileF, tc(3 * f + 2), 0);
     float p = meta.x;
     float lenc = min(float(len), meta.z);
     vec2 p0 = lf.xy;
+    float z = (zz.x + zz.y) * uZScale + 0.04;
+    // device pixels per line at this row's depth: the focus scale, foreshortened
+    float w0 = max((uMVP * vec4(p0, z, 1.0)).w, 1e-6);
+    float ppl = p * uScale * uFocusW / w0;
+    // LOD 0 (under one device pixel per line) keeps the first row that
+    // starts in each new pixel row: exactly one bar per pixel row at any
+    // pitch, meeting LOD 1's full rows at one pixel per line with no step
+    // (an integer stride halved the density just under it)
+    bool sampled_out = lod == 0 && j > 0 && floor(float(j) * ppl) == floor(float(j - 1) * ppl);
+    bool kill = len == 0 || sampled_out || (uProp == 1 && lod >= 2);
     // the row's width in line heights (lf.w) from the layout: the clipped
     // character count times the aspect for a monospace face, the sum of the
-    // advances for a proportional one
-    float z = (zz.x + zz.y) * uZScale + 0.04;
-    // a sampled bar is one device pixel tall where it is: at this row's
-    // depth, w / (uScale * uFocusW) world units (1 / uScale in 2D); a bar
-    // sized at the focus would thin to nothing in the distance and fall
-    // between pixel rows, whole rows of pages flickering white
-    float w0 = max((uMVP * vec4(p0, z, 1.0)).w, 1e-6);
-    vec2 p1 = p0 + vec2(lf.w * p, lod == 0 ? w0 / (uScale * uFocusW) : p);
+    // advances for a proportional one; a sampled bar is one device pixel
+    // tall where it is, p / ppl world units, so it never thins to nothing
+    // in the distance and falls between pixel rows
+    vec2 p1 = p0 + vec2(lf.w * p, lod == 0 ? p / ppl : p);
     kill = kill || p1.x < uView.x || p0.x > uView.z || p1.y < uView.y || p0.y > uView.w;
     gl_Position = kill ? vec4(-2.0, -2.0, 0.0, 1.0) : uMVP * vec4(mix(p0, p1, aQuad), z, 1.0);
     vUV = aQuad;
     vOff = uvec2(lu.x, lu.w);
     vMeta = ivec4(int(lu.z & 0xFFFFu), int(lenc), lod, int(fu.y));
-    // device pixels per line where this row is: the focus scale, foreshortened
-    vPpl = p * uScale * uFocusW / max(gl_Position.w, 1e-6);
+    vPpl = ppl;
 }
 // ---- fragment ----
 #version 330 core
