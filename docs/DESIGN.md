@@ -109,7 +109,7 @@ Per frame, in numpy over files: pixels per line `ppl = file_pitch * zoom`, fores
 | LOD | ppl | drawn |
 |---|---|---|
 | 0 sampled bars | under 1 | every step-th row as a grey bar exactly one pixel tall at its own depth, from indent to length, so the density stays about one bar per pixel row; the kind bands beneath |
-| 1 line bars | 1 to 3 | one grey bar per row from indent to length; the kind bands beneath |
+| 1 line bars | 1 to 3 | one grey bar per row from indent to length; the kind bands beneath. A bar or block stands 0.7 of its row tall, but the gap is carved only once it is a pixel and a half; thinner, the bar fills the row and carries the gap in its alpha, the same mean ink, so nothing shimmers as the gap crosses pixel rows |
 | 2 tokens | 3 to 6 | one block per character in its kind colour; item outlines |
 | 3 text | 6 and up | glyphs in the kind colour, from the raster atlas below 12 px per line and from the vector tier above; item outlines |
 

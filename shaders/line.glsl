@@ -101,11 +101,17 @@ void main() {
     int col = int(floor(fx));
     float dim = (flags & 8) != 0 ? 0.45 : 1.0;
     // bars and token blocks leave the bottom of the cell empty so rows read
-    // as rows; never thinner than one device pixel
+    // as rows, but only once that gap is a pixel and a half: thinner, it
+    // would land on a pixel row or not from frame to frame and the columns
+    // would shimmer, so the bar fills the row and carries the gap in its
+    // alpha instead, the same mean ink either way
     float barf = max(0.7, min(1.0, 1.0 / vPpl));
-    // bar brightness ramps with pixels per line across the LOD 0/1 cut,
-    // so only the sampling changes at one pixel per line, not the look
-    float bara = clamp(0.5 + 0.15 * vPpl, uInk.x, uInk.y);
+    bool carve = (1.0 - barf) * vPpl >= 1.5;
+    float fill = carve ? 1.0 : barf;
+    // bar alpha eases from the scheme's far ink to its near ink between one
+    // and three pixels per line, so only the sampling changes at the LOD
+    // 0/1 cut and the bars meet the blocks' ink at the LOD 1/2 cut
+    float bara = mix(uInk.x, uInk.y, clamp((vPpl - 1.0) / 2.0, 0.0, 1.0));
     // the indent as a fraction of the row: indent columns over the clipped
     // length (a proportional row's indent is spaces, uniform enough)
     float indf = lenc > 0.0 ? float(indent) / lenc : 0.0;
@@ -115,8 +121,8 @@ void main() {
         return;
     }
     if (lod == 1) {
-        if (vUV.x < indf || vUV.y > barf) discard;
-        frag = vec4(uBar * dim, bara);
+        if (vUV.x < indf || (carve && vUV.y > barf)) discard;
+        frag = vec4(uBar * dim, bara * fill);
         return;
     }
     uint o = vOff.x + uint(col);            // hi word is zero below 4 GB
@@ -124,8 +130,8 @@ void main() {
     if (kind == 0u) discard;
     vec3 kc = uKindColor[int(kind) % 10] * dim;
     if (lod == 2) {
-        if (vUV.y > barf) discard;
-        frag = vec4(kc, uInk.z);
+        if (carve && vUV.y > barf) discard;
+        frag = vec4(kc, uInk.z * fill);
         return;
     }
     uint ch = texelFetch(uChars, tcc(o), 0).x;

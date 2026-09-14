@@ -86,9 +86,10 @@ void main() {
     float dim = (flags & 8) != 0 ? 0.45 : 1.0;
     vec3 kc = uKindColor[vKind % 10] * dim;
     float barf = max(0.7, min(1.0, 1.0 / vPpl));
+    bool carve = (1.0 - barf) * vPpl >= 1.5;           // as line.glsl: a real gap only once it is wide enough
     if (lod == 2) {
-        if (vUV.y > barf) discard;
-        frag = vec4(kc, uInk.z);
+        if (carve && vUV.y > barf) discard;
+        frag = vec4(kc, uInk.z * (carve ? 1.0 : barf));
         return;
     }
     vec2 gdx = dFdx(vUV), gdy = dFdy(vUV);
