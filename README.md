@@ -1,6 +1,8 @@
-# big-text
+# [big-text](https://erik-larsen.github.io/big-text/)
 
 View millions of lines of source code, or a whole book, as one continuous surface. Zoom out and a codebase looks like a CPU die shot; zoom in and every glyph is crisp. No page turns, no mode switches, one camera, 2D or 3D views.
+
+**[Try War and Peace, or big-text's own source, in your browser →](https://erik-larsen.github.io/big-text/)**
 
 ![emscripten, 11,495 files and 2.8 million lines, fitted in 2D: a die shot](docs/shots/emscripten/overview.png)
 *Code atlas view of emscripten*
@@ -135,6 +137,27 @@ The README's second image is the viewer scripted from the shell, and the opening
 
 Any Gutenberg plain text works the same way: `--gutenberg N` with its ebook number, or a path to a text file already on disk. A text whose parts and chapters are headed `BOOK`, `PART`, `VOLUME`, `EPILOGUE` or `PROLOGUE` and `CHAPTER` at the start of a line splits as War and Peace does; a text without headings becomes one part named after the corpus, its pages `name/p. 1` onward. `--font` sets the face, any TrueType or OpenType file under the repository, and everything that depends on it follows: the reflow, the footer, the centred headings and the ink are measured from the face at index time; `--leading` its air between lines (1.3); `--page-lines` sets the page (40 by default), `--page-aspect` its shape (Letter, `612:792`), `--no-reflow` keeps Gutenberg's own line breaks, `--front` names the part before the first heading (`Front matter`), and `--name` the corpus. The text is kept in Windows-1252, which both glyph tiers cover, so Natásha keeps her accent and the quotes stay curly; a character outside it becomes `?`.
 
+### C and the web
+
+`c/bt_viewer.c` is the viewer again in C, SDL2 and OpenGL ES 3: native on the Mac through ANGLE, and in the browser through Emscripten and WebGL 2, the live demo. It draws with the same shaders, which the Python viewer's GL 3.3 already kept within GLSL ES 3.00, rewritten only in their `#version` line as they load, and from the same atlases, which `atlas_export.py` turns into one flat file of named arrays, `viewer.bin`, so the C side reads them without a parser and builds nothing: the raster and vector glyph data, the ink, the scheme, the directory tags and the items' keywords come baked in. A proportional face's glyph x's go as rounded steps along each row, so War and Peace is 5.1 MB gzipped for the browser. The Mac build needs SDL2 (`brew install sdl2`) and [opengl-for-mac](https://github.com/erik-larsen/opengl-for-mac)'s ANGLE libraries and GLES 3 headers:
+
+```bash
+./atlas_export.py data/war-and-peace_atlas
+OGL_FOR_MAC=../opengl-for-mac ./c/build_mac.sh
+./c/bt_viewer data/war-and-peace_atlas
+```
+
+Everything in Controls works the same. The scripting flags stay the Python viewer's; the C viewer takes the few it is checked against the Python one with, `--goto`, `--zoom`, `--filter`, `--proj`, `--tilt`, `--yaw`, `--heights`, `--tint`, `--frames` and `--screenshot`, and renders the same views to within a few stray pixels. The web build needs [emsdk](https://emscripten.org/docs/getting_started/downloads.html); the page fetches `web/data/<corpus>.bin.gz`, inflates it into the in-memory filesystem and starts the viewer on it:
+
+```bash
+./atlas_export.py data/war-and-peace_atlas --gzip
+mkdir -p web/data && cp data/war-and-peace_atlas/viewer.bin.gz web/data/war-and-peace.bin.gz
+./c/build_web.sh
+python3 -m http.server -d web      # http://localhost:8000
+```
+
+The live demo is built from scratch on every push to main by `.github/workflows/pages.yml`: both corpora indexed, laid out and exported, the viewer compiled, and `web/` published to GitHub Pages.
+
 ## Controls
 
 | Input | Action |
@@ -149,6 +172,7 @@ Any Gutenberg plain text works the same way: `--gutenberg N` with its ebook numb
 | `Alt` + drag | Tilt (vertical) and turn (horizontal) the 3D camera; from 2D it switches to 3D |
 | `H` | The heights on and off in 3D: files rise by their weight, directories are terraces; off by default |
 | `C` | The tint on and off, when the corpus has one: for code, lines added and removed over the git history, in ember |
+| Pinch | Zoom, on a touch screen (the C viewer) |
 | `R` | Reset the view to the fitted map |
 | `Escape` | Clear the filter |
 
@@ -246,7 +270,7 @@ The decisions and their reasons are in [docs/DESIGN.md](docs/DESIGN.md). Open:
 
 1. **The next corpus.** The book took the code adapter with pages as files and reading order as the layout, and cost no shader; photos exercise the image payload and big-picture's pyramid and are the first real test of the adapter split. Proposal: photos, then DXF.
 2. **Beyond Windows-1252.** The tiers cover one byte per character, which holds the whole of War and Peace with its quotes, dashes and accents. A book in Greek or Cyrillic, or one with more than 224 distinct glyphs, needs wider characters and a glyph table that grows with the corpus.
-3. **The browser.** Python with OpenGL 3.3 is the prototype; the browser is the target. The contract for getting there is the files and the shaders, not the Python: every generated `.npz` gets a documented binary layout, and every shader stays within GLSL ES 3.0 (texelFetch and integer samplers in, geometry shaders and bindless out), so a WebGL2 viewer reads the same atlases and links the same shaders. WebGPU later, from the same data.
+3. **The browser.** Reached by the contract the prototype kept: the shaders stayed within GLSL ES 3.0 (texelFetch and integer samplers in, geometry shaders and bindless out) and needed one cast to link in WebGL 2, and the atlases got a documented binary layout, `viewer.bin`. The C viewer runs both natively and in the browser. Open: whether the C viewer takes over the scripting flags and the Python one retires to a reference, and a streaming atlas for corpora too large to download whole (emscripten's is 279 MB on the GPU). WebGPU later, from the same data.
 4. **Budget and eviction.** Per-file instance ranges under a byte budget for text and big-picture's pages for images; whether one budget covers both. Built only once a corpus needs it.
 5. **The handoff from raster glyphs to line bars.** Where a pixel starts to cover several glyphs and per-glyph quads overdraw: a hard cut at a pixels-per-line threshold as today, a blend, or whole lines cached as texture rows first. The one place the levels of detail are not yet designed, and the same problem in all three payloads.
 
@@ -264,7 +288,7 @@ What big-text reuses, with the licence and the way it is reused: pin (a submodul
 | emscripten | the Emscripten authors, MIT or University of Illinois/NCSA | the scale example's corpus, cloned by the reader next to big-text; nothing of it is copied, and only screenshots of it are committed |
 | JetBrains Mono NL | JetBrains, OFL 1.1 | pin: `fonts/JetBrainsMonoNL-Regular.ttf` with `fonts/OFL.txt` and `fonts/AUTHORS.txt`; the atlases the viewer builds from it are embeddings in the OFL's sense |
 | Literata | the Literata Project Authors, OFL 1.1 | pin: `fonts/Literata-Regular.ttf`, the Regular instance at the 12 pt optical size cut from the variable font of release 3.103 with fontTools, with `fonts/Literata-OFL.txt` and `fonts/Literata-AUTHORS.txt`; the book's face |
-| War and Peace | Leo Tolstoy, Maude translation, public domain via Project Gutenberg (ebook 2600) | the book corpus: `book_index.py --gutenberg 2600` fetches it into `data/gutenberg/` |
+| War and Peace | Leo Tolstoy, Maude translation, public domain via Project Gutenberg (ebook 2600) | the book corpus, committed as `data/gutenberg/pg2600.txt` with Gutenberg's header and licence, which `book_index.py` drops |
 
 The default face, code's and the UI's, is JetBrains Mono NL Regular: OFL, TrueType with quadratic outlines so the vector tier converts nothing, and legible at the small sizes the levels of detail spend most of their time at. The book's is Literata Regular, also TrueType with quadratic outlines. Its OS/2 line box carries 1.32 em of leading, which would shrink every glyph at a given pixels per line, so the line box is defined as the face's ASCII ink extents, 1.05 em. `--font` takes any face on the machine; nothing generated from a font is committed.
 
@@ -283,9 +307,13 @@ big-text/
   atlas_font.py                monospace font -> raster glyph atlas
   vt_glyphs.py                 the vector glyph tier's curve and band textures (Slug's form)
   atlas_viewer.py              the viewer
-  shaders/                     GLSL 330, one file per program (dir, file, line, glyph, rect, text, wall, vt_glyph)
+  atlas_export.py              atlas -> viewer.bin, one flat file for the C viewer, glyph data included
+  c/                           the C viewer (SDL2, GLES 3) and its Mac and web builds
+  web/                         the page the web build runs in (the live demo)
+  shaders/                     GLSL 330, one file per program (dir, file, line, glyph, rect, text, wall, vt_glyph), loaded as GLSL ES 3.00 by the C viewer
   tests/                       layout invariants, viewer input driven by synthetic input, vector glyph accuracy, the tier measurement (bench_vt.py)
   fonts/                       JetBrains Mono NL and Literata, each with its OFL licence
-  data/                        generated atlases, glyph caches and fetched books (gitignored)
+  data/                        generated atlases (gitignored), the vector glyph caches and War and Peace
+  .github/workflows/pages.yml  builds and publishes the live demo
   big-picture/, hepr/, slug/   submodules, pinned
 ```
