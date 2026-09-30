@@ -114,7 +114,7 @@ void main() {
     float bara = mix(uInk.x, uInk.y, clamp((vPpl - 1.0) / 2.0, 0.0, 1.0));
     // the indent as a fraction of the row: indent columns over the clipped
     // length (a proportional row's indent is spaces, uniform enough)
-    float indf = lenc > 0.0 ? float(indent) / lenc : 0.0;
+    float indf = lenc > 0 ? float(indent) / float(lenc) : 0.0;
     if (lod == 0) {                        // a sampled line: one pixel row
         if (vUV.x < indf) discard;
         frag = vec4(uBar * dim, bara);

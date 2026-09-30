@@ -8,3 +8,10 @@ __pycache__/
 
 # the vector-tier test writes its renders here
 data/vt_test/
+
+# the C viewer's builds (c/build_mac.sh, c/build_web.sh) and the atlases the
+# web page loads (atlas_export.py --gzip), made by the Pages workflow
+c/bt_viewer
+web/bt_viewer.js
+web/bt_viewer.wasm
+web/data/
