@@ -2725,7 +2725,13 @@ static void draw_ui(App *a)
 
 static void render(App *a)
 {
+    /* a fitted map stays fitted when the window changes size; a canvas can
+       also start at 0x0 and only get its size from the page a frame later */
+    int old_w = a->fb_w, old_h = a->fb_h;
+    bool fitted = old_w <= 0 || old_h <= 0 || is_fitted(a);
     update_sizes(a);
+    if ((a->fb_w != old_w || a->fb_h != old_h) && a->fb_w > 0 && a->fb_h > 0 && fitted)
+        fit(a);
     glViewport(0, 0, a->fb_w, a->fb_h);
     glClearColor(a->bg[0], a->bg[1], a->bg[2], 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
