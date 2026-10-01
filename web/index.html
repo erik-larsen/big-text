@@ -92,6 +92,12 @@
   #loading .fill { width: 0; height: 100%; background: var(--accent); transition: width 0.15s; }
   #loading.error .bar { display: none; }
   #loading.error #loading-text { color: #f08080; }
+  #loading-detail {
+    max-width: min(720px, calc(100vw - 32px)); max-height: 50vh; overflow: auto; margin: 12px auto 0;
+    color: var(--muted); font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+    white-space: pre-wrap; text-align: left;
+  }
+  #loading-detail:empty { display: none; }
 
   @media (max-width: 760px) { #summary { display: none; } }
   @media (max-width: 520px) { #status { display: none; } header { gap: 8px; } }
@@ -116,6 +122,7 @@
   <div>
     <div id="loading-text">Loading…</div>
     <div class="bar"><div class="fill" id="loading-fill"></div></div>
+    <pre id="loading-detail"></pre>
   </div>
 </div>
 
@@ -161,11 +168,14 @@ for (const c of CORPORA) {
 $('summary').textContent = corpus.summary;
 $('loading-text').textContent = `Loading ${corpus.label}…`;
 
-function fail(msg) {
+function fail(msg, detail) {
   $('loading').classList.add('error');
   $('loading').classList.remove('done');
   $('loading-text').textContent = msg;
+  $('loading-detail').textContent = detail || '';
 }
+window.addEventListener('error', e => fail('Something went wrong starting the viewer.', e.message));
+window.addEventListener('unhandledrejection', e => fail('Something went wrong starting the viewer.', String(e.reason)));
 
 $('help-toggle').addEventListener('click', () => {
   const open = $('help').classList.toggle('open');
@@ -199,7 +209,7 @@ var Module = {
   arguments: ['/atlas.bin'],
   print: t => console.log(t),
   printErr: t => console.warn(t),
-  onAbort: () => fail('Something went wrong starting the viewer.'),
+  onAbort: what => fail('Something went wrong starting the viewer.', String(what || '')),
 
   // the atlas goes into the in-memory filesystem before main() runs, so the
   // C side reads it exactly as it does natively
@@ -215,6 +225,9 @@ var Module = {
   }],
 
   // called from C (bt_viewer.c)
+  btFail(msg) {
+    fail('The viewer couldn’t start in this browser.', msg);
+  },
   btReady() {
     document.title = `big text · ${corpus.label}`;   // SDL named the tab after its window
     $('loading').classList.add('done');

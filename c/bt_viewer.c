@@ -40,7 +40,7 @@
 #include <string.h>
 #include <sys/stat.h>
 
-#define CHARS_W 16384         /* width of tex_chars / tex_kinds, shared with line.glsl */
+#define CHARS_LOG_W 14        /* tex_chars / tex_kinds are 16384 wide where the GPU allows (line.glsl's default) */
 #define TEX_W 4096            /* width of the per-line and per-file textures */
 #define UI_UNIT 11            /* the texture unit of the UI's own glyph atlas */
 #define ZOOM_TAU 0.12         /* glide time constant, seconds */
@@ -98,10 +98,16 @@ typedef struct {          /* strings: a Windows-1252 blob and n + 1 offsets */
     int n;
 } Strs;
 
+/* stop with a message: on stderr, and on the web page too, which would
+   otherwise sit on its loading screen */
 static void die(const char *fmt, const char *s)
 {
-    fprintf(stderr, fmt, s);
-    fputc('\n', stderr);
+    char msg[8192];
+    snprintf(msg, sizeof msg, fmt, s);
+    fprintf(stderr, "%s\n", msg);
+#ifdef __EMSCRIPTEN__
+    EM_ASM({ if (Module.btFail) Module.btFail(UTF8ToString($0)); }, msg);
+#endif
     exit(1);
 }
 
@@ -336,6 +342,7 @@ typedef struct {
     float *char_x;        /* a proportional face's x of every character within its row */
     int n_files, n_lines, n_rows, n_dirs, n_items, n_item_rects;
     int64_t n_chars;
+    int chars_log_w;      /* the character textures are 1 << chars_log_w wide */
     Strs paths, item_names, item_kws, dir_labels, dir_tags;
     char name[256], tint_label[64];
     double W, H, A, median_pitch;
@@ -479,10 +486,10 @@ static GLuint compile(GLenum kind, const char *src, const char *name)
     GLint ok;
     glGetShaderiv(sh, GL_COMPILE_STATUS, &ok);
     if (!ok) {
-        char log[4096];
+        char log[4096], msg[4300];
         glGetShaderInfoLog(sh, sizeof log, NULL, log);
-        fprintf(stderr, "%s.glsl (%s): %s\n", name, kind == GL_VERTEX_SHADER ? "vertex" : "fragment", log);
-        exit(1);
+        snprintf(msg, sizeof msg, "%s.glsl (%s): %s", name, kind == GL_VERTEX_SHADER ? "vertex" : "fragment", log);
+        die("error: %s", msg);
     }
     return sh;
 }
@@ -496,8 +503,12 @@ static GLuint load_program(App *a, const char *name, const char *frag_prefix)
     char *split = strstr(src, marker);
     if (!split || strstr(split + 1, marker))
         die("error: %s: expected one fragment marker", path);
-    char *vs = es_stage(src, split - src, "");
-    char *fs = es_stage(split, strlen(split), frag_prefix);
+    char defs[64], *fs_prefix = malloc(strlen(frag_prefix) + sizeof defs);
+    snprintf(defs, sizeof defs, "#define CHARS_LOG_W %d\n", a->chars_log_w);
+    sprintf(fs_prefix, "%s%s", defs, frag_prefix);
+    char *vs = es_stage(src, split - src, defs);
+    char *fs = es_stage(split, strlen(split), fs_prefix);
+    free(fs_prefix);
     GLuint prog = glCreateProgram();
     glAttachShader(prog, compile(GL_VERTEX_SHADER, vs, name));
     glAttachShader(prog, compile(GL_FRAGMENT_SHADER, fs, name));
@@ -505,10 +516,10 @@ static GLuint load_program(App *a, const char *name, const char *frag_prefix)
     GLint ok;
     glGetProgramiv(prog, GL_LINK_STATUS, &ok);
     if (!ok) {
-        char log[4096];
+        char log[4096], msg[4300];
         glGetProgramInfoLog(prog, sizeof log, NULL, log);
-        fprintf(stderr, "%s.glsl: %s\n", name, log);
-        exit(1);
+        snprintf(msg, sizeof msg, "%s.glsl: %s", name, log);
+        die("error: %s", msg);
     }
     free(src);
     free(vs);
@@ -660,7 +671,7 @@ static void load_corpus(App *a, const char *path)
     a->n_items = (int)count_of(b, "item_file");
     a->n_item_rects = (int)count_of(b, "item_rect");
     a->n_chars = (int64_t)count_of(b, "chars");
-    if (a->n_chars > (int64_t)CHARS_W * CHARS_W)
+    if (a->n_chars > ((int64_t)1 << (2 * CHARS_LOG_W)))
         die("error: the corpus exceeds the %s texture; the resident design stops here", "16384x16384");
     a->W = a->world[0];
     a->H = a->world[1];
@@ -962,8 +973,16 @@ static void open_window(App *a)
     GLint max_tex;
     glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_tex);
     printf("GL: %s | %s | max texture %d\n", glGetString(GL_VERSION), glGetString(GL_RENDERER), max_tex);
-    if (max_tex < CHARS_W)
-        die("error: this GPU's textures stop short of the %s the corpus's characters are laid in", "16384 texels");
+    /* the characters' textures as wide as the GPU allows, up to 16384:
+       Firefox caps every texture at 8192, which still holds 67 million */
+    a->chars_log_w = CHARS_LOG_W;
+    while (a->chars_log_w > 10 && (1 << a->chars_log_w) > max_tex)
+        a->chars_log_w--;
+    if (a->n_chars > ((int64_t)1 << (2 * a->chars_log_w))) {
+        char n[64];
+        snprintf(n, sizeof n, "%lld characters", (long long)a->n_chars);
+        die("error: the corpus's %s do not fit this GPU's largest texture", n);
+    }
     update_sizes(a);
     SDL_StartTextInput();
 }
@@ -1004,8 +1023,9 @@ static void setup_gl(App *a)
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 
     int64_t gpu = 0;
-    a->tex_chars = tex_rows(GL_R8UI, GL_RED_INTEGER, GL_UNSIGNED_BYTE, 1, CHARS_W, a->n_chars, a->chars, &gpu);
-    a->tex_kinds = tex_rows(GL_R8UI, GL_RED_INTEGER, GL_UNSIGNED_BYTE, 1, CHARS_W, a->n_chars, a->kinds, &gpu);
+    int chars_w = 1 << a->chars_log_w;
+    a->tex_chars = tex_rows(GL_R8UI, GL_RED_INTEGER, GL_UNSIGNED_BYTE, 1, chars_w, a->n_chars, a->chars, &gpu);
+    a->tex_kinds = tex_rows(GL_R8UI, GL_RED_INTEGER, GL_UNSIGNED_BYTE, 1, chars_w, a->n_chars, a->kinds, &gpu);
     upload_layout(a);
     if (a->prop) {        /* per character: its row and its x within the row */
         float *cf = malloc(a->n_chars * 2 * sizeof(float));
@@ -1015,7 +1035,7 @@ static void setup_gl(App *a)
                 cf[2 * o] = (float)r;
                 cf[2 * o + 1] = a->char_x[o];
             }
-        a->tex_char_f = tex_rows(GL_RG32F, GL_RG, GL_FLOAT, 8, CHARS_W, a->n_chars, cf, &gpu);
+        a->tex_char_f = tex_rows(GL_RG32F, GL_RG, GL_FLOAT, 8, chars_w, a->n_chars, cf, &gpu);
         free(cf);
     }
     a->file_u_rows = (a->n_files + TEX_W - 1) / TEX_W;

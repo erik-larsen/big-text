@@ -88,7 +88,10 @@ out vec4 frag;
 uniform vec3 uBar;          // the line bar colour, from the scheme
 uniform vec3 uInk;          // the scheme's ink: the bars' alpha far and near, and the word blocks'
 
-ivec2 tcc(uint o) { return ivec2(int(o & 16383u), int(o >> 14)); }
+#ifndef CHARS_LOG_W
+#define CHARS_LOG_W 14          // tex_chars and tex_kinds are 1 << CHARS_LOG_W wide (the C viewer narrows them
+#endif                          // where a browser's textures stop short, as Firefox's at 8192)
+ivec2 tcc(uint o) { return ivec2(int(o & uint((1 << CHARS_LOG_W) - 1)), int(o >> uint(CHARS_LOG_W))); }
 
 void main() {
     int indent = vMeta.x, lenc = vMeta.y, lod = vMeta.z, flags = vMeta.w;

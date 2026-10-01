@@ -33,7 +33,10 @@ flat out ivec2 vRF;         // LOD, flags
 flat out float vPpl;
 
 ivec2 tc(int i) { return ivec2(i & 4095, i >> 12); }
-ivec2 tcc(int o) { return ivec2(o & 16383, o >> 14); }
+#ifndef CHARS_LOG_W
+#define CHARS_LOG_W 14          // the character textures' width, as line.glsl
+#endif
+ivec2 tcc(int o) { return ivec2(o & ((1 << CHARS_LOG_W) - 1), o >> CHARS_LOG_W); }
 
 void main() {
     int o = gl_InstanceID + uBase;
