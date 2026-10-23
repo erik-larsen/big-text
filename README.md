@@ -7,7 +7,11 @@ View millions of lines of source code, or a whole book, as one continuous surfac
 ![emscripten, 11,495 files and 2.8 million lines, fitted in 2D: a die shot](docs/shots/emscripten/overview.png)
 *Code atlas view of emscripten*
 
+![big-text's own source tilted in 3D: atlas_viewer.py up close as vector glyphs, the rest of the repo receding as tokens and line bars](docs/shots/big-text/3d_closeup.webp)
+*Code atlas view of this repo*
+
 ![War and Peace flyover: one flat sheet of pages, the near ones as text, the far rows as line bars, the Books as coloured bands](docs/shots/war-and-peace/hero.png)
+![War and Peace tilted in 3D: a page's lines up close in Literata, the pages behind it shrinking toward the horizon](docs/shots/war-and-peace/3d_closeup.webp)
 *Book viewer of Tolstoy's War and Peace*
 
 This project is similar to [big-picture](https://github.com/erik-larsen/big-picture), though for viewing massive text collections rather than massive image collections.  This project has similar viewing tools and performance optimizations as big-picture to maintain smooth continuous zooming and panning though it replaces streaming on demand with loading all of the data into memory, and uses an alternate LOD system to big-picture's tiled image pyramid:
