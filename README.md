@@ -2,8 +2,6 @@
 
 View millions of lines of source code, or a whole book, as one continuous surface. Zoom out and a codebase looks like a CPU die shot; zoom in and every glyph is crisp. No page turns, no mode switches, one camera, 2D or 3D views.
 
-**[Try War and Peace, or big-text's own source, in your browser →](https://erik-larsen.github.io/big-text/)**
-
 ![emscripten, 11,495 files and 2.8 million lines, fitted in 2D: a die shot](docs/shots/emscripten/overview.png)
 *Code atlas view of emscripten*
 
